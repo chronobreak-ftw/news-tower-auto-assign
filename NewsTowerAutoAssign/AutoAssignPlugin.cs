@@ -139,7 +139,7 @@ namespace NewsTowerAutoAssign
                 "MinReportersToActivate",
                 3,
                 Hidden(
-                    "Below this many globetrotter reporters the mod is fully passive (tutorial / early-game safety)."
+                    "Below this many reporters the mod is fully passive (tutorial / early-game safety)."
                 )
             );
 #if DEBUG

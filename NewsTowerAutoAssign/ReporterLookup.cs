@@ -16,34 +16,164 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign
 {
-    // Queries about reporters (globetrotters) and active goals. Anything that
+    // Queries about reporters and active goals. Anything that
     // reads `Employee.Employees` or `QuestManager` lives here so the assignment
     // evaluator stays focused on decision flow.
     internal static class ReporterLookup
     {
-        // Fewer than `MinReportersToActivate` playable globetrotters means we cannot
-        // make reliable judgements. Matches the game's own staff board filter exactly:
-        // StaffBoardSwitchPanelDisplayer / HiringBoard / JobTabDisplayer all use
-        // JobHandler.JobData.hideFromDrawer == false. Cinematic/tutorial actor
-        // reporters use a hidden job type; real player reporters don't.
-        internal static int CountPlayableGlobetrotters()
+        // The ScriptableObject asset name of the "Reporter" JobData. Production
+        // and Utility staff also satisfy Employee.IsGlobetrotter (they have a
+        // reportable component and a workplace) - IsGlobetrotter alone would
+        // over-count a 2-reporter / 10-support roster as 12 "globetrotters",
+        // which is exactly what the [ROSTER] diagnostic revealed. Filtering on
+        // this asset name is the same signal the game's own scoring UI uses
+        // (EmployeeDisplayer.reporterJobData) to tell reporter counts apart
+        // from production / utility counts.
+        private const string ReporterJobName = "Reporter";
+
+        // Single source of truth for "this is a live, playable reporter we can
+        // reason about". All three reporter-scanning helpers below MUST use
+        // this - anything less restrictive pulls in non-reporter employees.
+        private static bool IsPlayableReporter(Employee e)
         {
-            return Employee.Employees.Count(e =>
-                e.IsGlobetrotter && e.IsInTower && e.JobHandler?.JobData?.hideFromDrawer == false
-            );
+            if (e == null)
+                return false;
+            if (!e.IsGlobetrotter)
+                return false;
+            if (!e.IsInTower)
+                return false;
+            var job = e.JobHandler?.JobData;
+            if (job == null)
+                return false;
+            if (job.hideFromDrawer)
+                return false;
+            if (job.name != ReporterJobName)
+                return false;
+            return true;
         }
 
-        // Returns true if ANY globetrotter has the given skill trained, regardless
-        // of whether they are currently busy/timed-out. skill==null always returns
-        // true. Used to detect permanently unworkable paths (building not built or
-        // roster simply lacks the skill) - not just "everyone is temporarily busy".
+        // Fewer than `MinReportersToActivate` playable reporters means we
+        // cannot make reliable judgements. We intentionally require a
+        // Reporter JobData match here - Production / Utility employees also
+        // return true for Employee.IsGlobetrotter (they have reportable
+        // components + workplaces) but they don't cover stories, so letting
+        // them satisfy the gate would silently bypass the tutorial-phase
+        // safety and auto-assign with only 2 real reporters.
+        internal static int CountPlayableReporters()
+        {
+            var matched = Employee.Employees.Where(IsPlayableReporter).ToList();
+
+            LogRosterIfChanged(matched);
+            return matched.Count;
+        }
+
+        // Identity-based fingerprint of the last counted roster, used so the
+        // [ROSTER] diagnostic only fires when the set changes (not on every
+        // per-story check). Debug only - the caller never reads this.
+        private static string _lastRosterFingerprint;
+
+        // DEBUG-only: dumps every employee CountPlayableReporters treats as
+        // a playable reporter, plus the full Employee.Employees count, so we
+        // can see exactly which objects cause the gate to overcount. Fires
+        // only when the matched set actually changes.
+        [System.Diagnostics.Conditional("DEBUG")]
+        private static void LogRosterIfChanged(List<Employee> matched)
+        {
+            var fingerprint = string.Join(
+                ",",
+                matched
+                    .Select(e => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(e))
+                    .OrderBy(id => id)
+            );
+            if (fingerprint == _lastRosterFingerprint)
+                return;
+            _lastRosterFingerprint = fingerprint;
+
+            int totalEmployees = Employee.Employees.Count;
+            int totalAlive = Employee.Employees.Count(e => e != null);
+
+            AssignmentLog.Info(
+                "ROSTER",
+                "counted="
+                    + matched.Count
+                    + " / Employees.Count="
+                    + totalEmployees
+                    + " (alive="
+                    + totalAlive
+                    + ")"
+            );
+
+            for (int i = 0; i < matched.Count; i++)
+            {
+                var e = matched[i];
+                var personName = e.GetComponentInChildren<NameHandler>()?.EmployeeName;
+                var jobName = e.JobHandler?.JobData?.name ?? "<no-job>";
+                AssignmentLog.Info(
+                    "ROSTER",
+                    "  #"
+                        + (i + 1)
+                        + " obj='"
+                        + (e.name ?? "<null>")
+                        + "' person='"
+                        + (string.IsNullOrEmpty(personName) ? "<no-name>" : personName)
+                        + "' job='"
+                        + jobName
+                        + "' IsGlobetrotter="
+                        + e.IsGlobetrotter
+                        + " IsInTower="
+                        + e.IsInTower
+                        + " hideFromDrawer="
+                        + (e.JobHandler?.JobData?.hideFromDrawer)
+                );
+            }
+
+            // Excluded employees are summarised by job (Production x7, Utility
+            // x3, etc.) rather than dumped line-by-line - a mature tower can
+            // easily have a dozen support staff and we don't want the full
+            // roster printed on every matched-set change. The per-employee
+            // dump above is the important bit for confirming the filter.
+            var excludedByJob = new Dictionary<string, int>();
+            foreach (var e in Employee.Employees)
+            {
+                if (e == null)
+                    continue;
+                if (matched.Contains(e))
+                    continue;
+                var jobName = e.JobHandler?.JobData?.name ?? "<no-job>";
+                excludedByJob.TryGetValue(jobName, out int n);
+                excludedByJob[jobName] = n + 1;
+            }
+            if (excludedByJob.Count == 0)
+            {
+                AssignmentLog.Info("ROSTER", "  (no excluded employees)");
+            }
+            else
+            {
+                AssignmentLog.Info(
+                    "ROSTER",
+                    "  excluded by job: "
+                        + string.Join(
+                            ", ",
+                            excludedByJob
+                                .OrderByDescending(kv => kv.Value)
+                                .Select(kv => kv.Key + " x" + kv.Value)
+                        )
+                );
+            }
+        }
+
+        // Returns true if ANY playable reporter has the given skill trained,
+        // regardless of whether they are currently busy/timed-out. skill==null
+        // always returns true. Used to detect permanently unworkable paths
+        // (building not built or roster simply lacks the skill) - not just
+        // "everyone is temporarily busy".
         internal static bool AnyReporterEverHasSkill(SkillData skill)
         {
             if (skill == null)
                 return true;
             foreach (var e in Employee.Employees)
             {
-                if (!e.IsGlobetrotter || e.JobHandler?.JobData?.hideFromDrawer != false)
+                if (!IsPlayableReporter(e))
                     continue;
                 if (e.SkillHandler.HasSkillAndIsAssigned(skill))
                     return true;
@@ -51,11 +181,12 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
-        // Returns true if any globetrotter with `skill` is free now or will be free
-        // within `thresholdHours`. skill==null means any globetrotter qualifies.
-        // thresholdHours <= 0 disables the feature and always returns true.
-        // Converts via FromMinutes so fractional hours (e.g. 3.5h) are honoured -
-        // FromHours only accepts int and would silently round down.
+        // Returns true if any playable reporter with `skill` is free now or
+        // will be free within `thresholdHours`. skill==null means any reporter
+        // qualifies. thresholdHours <= 0 disables the feature and always
+        // returns true. Converts via FromMinutes so fractional hours (e.g.
+        // 3.5h) are honoured - FromHours only accepts int and would silently
+        // round down.
         internal static bool AnyReporterAvailableSoon(SkillData skill, float thresholdHours)
         {
             if (thresholdHours <= 0f)
@@ -66,7 +197,7 @@ namespace NewsTowerAutoAssign
 
             foreach (var e in Employee.Employees)
             {
-                if (!e.IsGlobetrotter || e.JobHandler?.JobData?.hideFromDrawer != false)
+                if (!IsPlayableReporter(e))
                     continue;
                 if (skill != null && !e.SkillHandler.HasSkillAndIsAssigned(skill))
                     continue;

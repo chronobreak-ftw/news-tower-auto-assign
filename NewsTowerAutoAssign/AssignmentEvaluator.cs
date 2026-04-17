@@ -156,15 +156,15 @@ namespace NewsTowerAutoAssign
             // Below the configured reporter threshold we cannot make reliable
             // skill/completability judgements. Skip ALL auto-assign and discard
             // logic - let the player handle everything manually until the roster grows.
-            int globetrotterCount = ReporterLookup.CountPlayableGlobetrotters();
-            if (globetrotterCount < AutoAssignPlugin.MinReportersToActivate.Value)
+            int reporterCount = ReporterLookup.CountPlayableReporters();
+            if (reporterCount < AutoAssignPlugin.MinReportersToActivate.Value)
             {
                 AssignmentLog.Verbose(
                     "ASSIGN",
                     "Skipped "
                         + AssignmentLog.StoryName(newsItem)
                         + " because only "
-                        + globetrotterCount
+                        + reporterCount
                         + " reporter(s), need "
                         + AutoAssignPlugin.MinReportersToActivate.Value
                         + " for automation."
