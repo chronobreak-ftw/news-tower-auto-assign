@@ -24,4 +24,4 @@ See [`NewsTowerAutoAssign/ASSIGNMENT_LOGIC.md`](NewsTowerAutoAssign/ASSIGNMENT_L
 
 ## License
 
-TBD.
+[MIT](LICENSE)

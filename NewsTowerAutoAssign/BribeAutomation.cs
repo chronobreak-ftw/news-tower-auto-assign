@@ -40,53 +40,67 @@ namespace NewsTowerAutoAssign
             if (TowerStats.Instance == null)
                 return;
             var difficulty = GameModeSettings.GetCurrentDifficultySettings();
-            if (difficulty == null)
+            if (difficulty?.bribeSettings == null)
                 return;
 
-            int minMoney = difficulty.bribeSettings.minMoney;
-            var newspaper = NewspaperManager.Instance?.CurrentNewspaper;
-
-            foreach (var bribe in newsItem.GetComponentsInChildren<NewsItemBribeComponent>(true))
+            try
             {
-                if (bribe == null || bribe.IsCompleted || bribe.IsDestroyed || bribe.IsChosen)
-                    continue;
+                int minMoney = difficulty.bribeSettings.minMoney;
+                var newspaper = NewspaperManager.Instance?.CurrentNewspaper;
 
-                var node = bribe.GetComponentInParent<NewsItemNode>(true);
-                if (node?.NodeState != NewsItemNodeState.Unlocked)
-                    continue;
-
-                int maxMoney = Mathf.Max(bribe.GetMaxMoney(difficulty, newspaper), minMoney);
-                int cost = DRNG.Range(bribe, minMoney, maxMoney);
-
-                if ((float)cost > TowerStats.Instance.Money)
+                foreach (
+                    var bribe in newsItem.GetComponentsInChildren<NewsItemBribeComponent>(true)
+                )
                 {
-                    AssignmentLog.DecisionOnce(
-                        newsItem,
-                        "bribe_unaffordable",
+                    if (bribe == null || bribe.IsCompleted || bribe.IsDestroyed || bribe.IsChosen)
+                        continue;
+
+                    var node = bribe.GetComponentInParent<NewsItemNode>(true);
+                    if (node?.NodeState != NewsItemNodeState.Unlocked)
+                        continue;
+
+                    int maxMoney = Mathf.Max(bribe.GetMaxMoney(difficulty, newspaper), minMoney);
+                    int cost = DRNG.Range(bribe, minMoney, maxMoney);
+
+                    if ((float)cost > TowerStats.Instance.Money)
+                    {
+                        AssignmentLog.DecisionOnce(
+                            newsItem,
+                            "bribe_unaffordable",
+                            AssignmentLog.StoryName(newsItem)
+                                + " "
+                                + AssignmentLog.StoryTagList(newsItem)
+                                + " → WAIT (bribe): cost "
+                                + cost
+                                + " exceeds available money "
+                                + (int)TowerStats.Instance.Money
+                                + " (will retry next scan)."
+                        );
+                        continue;
+                    }
+
+                    TowerStats.Instance.AddMoney(-(float)cost, false);
+                    var handler = _bribedEventField?.GetValue(null) as Action<float>;
+                    handler?.Invoke(-(float)cost);
+                    bribe.IsCompleted = true;
+                    AssignmentLog.ClearSuppression(newsItem);
+                    AssignmentLog.Decision(
                         AssignmentLog.StoryName(newsItem)
                             + " "
                             + AssignmentLog.StoryTagList(newsItem)
-                            + " → WAIT (bribe): cost "
+                            + " → BRIBE PAID: cost "
                             + cost
-                            + " exceeds available money "
-                            + (int)TowerStats.Instance.Money
-                            + " (will retry next scan)."
+                            + "."
                     );
-                    continue;
                 }
-
-                TowerStats.Instance.AddMoney(-(float)cost, false);
-                var handler = _bribedEventField?.GetValue(null) as Action<float>;
-                handler?.Invoke(-(float)cost);
-                bribe.IsCompleted = true;
-                AssignmentLog.ClearSuppression(newsItem);
-                AssignmentLog.Decision(
-                    AssignmentLog.StoryName(newsItem)
-                        + " "
-                        + AssignmentLog.StoryTagList(newsItem)
-                        + " → BRIBE PAID: cost "
-                        + cost
-                        + "."
+            }
+            catch (Exception e)
+            {
+                // Reflection / Unity component walks on an in-flight story can
+                // surface transient nulls - log once and move on rather than
+                // let the exception climb into the evaluator or Harmony patch.
+                AssignmentLog.Error(
+                    "BribeAutomation.TryPayBribes(" + AssignmentLog.StoryName(newsItem) + "): " + e
                 );
             }
         }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Reportables;
 using Tower_Stats;
@@ -9,6 +10,14 @@ namespace NewsTowerAutoAssign
     // Centralised logging + per-story decision suppression used by the assignment
     // evaluator and the bribe automation. Keeps a single writer for every log line
     // the mod produces so prefixes stay consistent.
+    //
+    // Release-build logging policy
+    // -----------------------------
+    // Every helper except `Error` is marked [Conditional("DEBUG")]. In Release
+    // builds the compiler removes the call AND the argument evaluation at every
+    // callsite, so no string concatenation cost is paid and the player's log
+    // stays clean. Only `Error` still fires - if something genuinely breaks we
+    // want a stack trace in the player's BepInEx log so bug reports are useful.
     internal static class AssignmentLog
     {
         // Deduplicate state-type decisions (kept risky, no reporter, etc.) per story.
@@ -16,58 +25,49 @@ namespace NewsTowerAutoAssign
         // when conditions actually change.
         private static readonly HashSet<string> _suppressedDecisions = new HashSet<string>();
 
-        // When OnlyLogTests is on we gate every non-error channel so the log
-        // contains nothing but the in-game test banners + PASS/FAIL/SKIP lines
-        // (those go through AutoAssignPlugin.Log directly in TestContext /
-        // InGameTestRunner and bypass this class on purpose). Errors are never
-        // suppressed - if something genuinely breaks the user still sees it.
-        private static bool Quiet => AutoAssignPlugin.OnlyLogTests?.Value ?? false;
-
+        [Conditional("DEBUG")]
         internal static void Info(string area, string message)
         {
-            if (Quiet)
-                return;
             AutoAssignPlugin.Log.LogInfo("[" + area + "] " + message);
         }
 
+        [Conditional("DEBUG")]
         internal static void Decision(string message)
         {
-            if (Quiet)
-                return;
             AutoAssignPlugin.Log.LogInfo("[DECISION] " + message);
         }
 
+        [Conditional("DEBUG")]
         internal static void Discard(string message)
         {
-            if (Quiet)
-                return;
             AutoAssignPlugin.Log.LogWarning("[DISCARD] " + message);
         }
 
+        [Conditional("DEBUG")]
         internal static void Warn(string area, string message)
         {
-            if (Quiet)
-                return;
             AutoAssignPlugin.Log.LogWarning("[" + area + "] " + message);
         }
 
+        // Errors are ALWAYS logged in every build - if something genuinely
+        // breaks the player (and their bug report) need a trace.
         internal static void Error(string message) => AutoAssignPlugin.Log.LogError(message);
 
+        [Conditional("DEBUG")]
         internal static void Verbose(string area, string message)
         {
-            if (Quiet)
-                return;
-            if (AutoAssignPlugin.VerboseLogs.Value)
+#if DEBUG
+            if (AutoAssignPlugin.VerboseLogs != null && AutoAssignPlugin.VerboseLogs.Value)
                 AutoAssignPlugin.Log.LogInfo("[VERBOSE:" + area + "] " + message);
+#endif
         }
 
         // Emits a DECISION line the first time a given (story, key) pair is seen.
         // Call ClearSuppression when a real state change happens so the message
         // can re-log next time the condition recurs.
+        [Conditional("DEBUG")]
         internal static void DecisionOnce(NewsItem newsItem, string decisionKey, string message)
         {
-            if (Quiet)
-                return;
             if (!_suppressedDecisions.Add(StoryId(newsItem) + ":" + decisionKey))
                 return;
             AutoAssignPlugin.Log.LogInfo("[DECISION] " + message);
@@ -120,31 +120,33 @@ namespace NewsTowerAutoAssign
             HashSet<PlayerStatDataTag> inProgressTags
         )
         {
-            var quantity = quantityGoalTags == null || quantityGoalTags.Count == 0
-                ? "none"
-                : string.Join(
-                    ", ",
-                    quantityGoalTags
-                        .Where(t => t != null)
-                        .Select(t => t.name)
-                        .OrderBy(s => s, StringComparer.Ordinal)
-                );
-            var binary = binaryGoalTags == null || binaryGoalTags.Count == 0
-                ? "none"
-                : string.Join(
-                    ", ",
-                    binaryGoalTags
-                        .Where(t => t != null)
-                        .OrderBy(t => t.name, StringComparer.Ordinal)
-                        .Select(t =>
-                            t.name
-                            + (
-                                inProgressTags != null && inProgressTags.Contains(t)
-                                    ? "(covered)"
-                                    : "(uncovered)"
+            var quantity =
+                quantityGoalTags == null || quantityGoalTags.Count == 0
+                    ? "none"
+                    : string.Join(
+                        ", ",
+                        quantityGoalTags
+                            .Where(t => t != null)
+                            .Select(t => t.name)
+                            .OrderBy(s => s, StringComparer.Ordinal)
+                    );
+            var binary =
+                binaryGoalTags == null || binaryGoalTags.Count == 0
+                    ? "none"
+                    : string.Join(
+                        ", ",
+                        binaryGoalTags
+                            .Where(t => t != null)
+                            .OrderBy(t => t.name, StringComparer.Ordinal)
+                            .Select(t =>
+                                t.name
+                                + (
+                                    inProgressTags != null && inProgressTags.Contains(t)
+                                        ? "(covered)"
+                                        : "(uncovered)"
+                                )
                             )
-                        )
-                );
+                    );
             return "binary={" + binary + "} quantity={" + quantity + "}";
         }
     }

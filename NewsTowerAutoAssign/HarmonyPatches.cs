@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using GlobalNews;
 using HarmonyLib;
@@ -10,24 +11,29 @@ using UI;
 
 namespace NewsTowerAutoAssign
 {
-    // Fires when any new reportable (news item) is added to the live manager.
-    // Bribes pay first (respect AutoResolveBribeMinigame toggle) so the evaluator
-    // sees any newly-unlocked nodes.
+    // All Harmony patch bodies are wrapped in try/catch so a bug in our mod
+    // can never propagate into the game's own frame loop. Exceptions from a
+    // Prefix/Postfix are otherwise logged by Harmony as warnings and - for
+    // some patch sites - can genuinely mis-sequence game state. We'd rather
+    // the player keep playing with a one-off Error in the BepInEx log than
+    // have the game misbehave because of us.
     [HarmonyPatch(typeof(LiveReportableManager), "AddReportable")]
     static class Patch_AddReportable
     {
         static void Postfix(Reportable reportable)
         {
-            AssignmentLog.Verbose("PATCH", "AddReportable: " + reportable?.GetType().Name);
-            var newsItem = reportable as NewsItem;
-            if (newsItem?.Data != null)
+            try
             {
+                AssignmentLog.Verbose("PATCH", "AddReportable: " + reportable?.GetType().Name);
+                var newsItem = reportable as NewsItem;
+                if (newsItem?.Data == null)
+                    return;
+
+#if DEBUG
                 // Dump the story's PlayerStatDataTags so faction / composed-quest
                 // injections (e.g. Red Herring on "SUSPICIOUS SHIPMENT STOPPED")
-                // are visible the moment they arrive - without this log the
-                // player can't tell whether the injection actually carried the
-                // expected tag until assignment already fired.
-                if (AutoAssignPlugin.VerboseLogs.Value)
+                // are visible the moment they arrive.
+                if (AutoAssignPlugin.VerboseLogs != null && AutoAssignPlugin.VerboseLogs.Value)
                 {
                     var tagNames = newsItem
                         .Data.DistinctStatTypes.OfType<PlayerStatDataTag>()
@@ -41,19 +47,20 @@ namespace NewsTowerAutoAssign
                             + "]"
                     );
                 }
+#endif
                 BribeAutomation.TryPayBribes(newsItem);
                 AssignmentEvaluator.TryAssignNewsItem(newsItem);
+            }
+            catch (Exception e)
+            {
+                AssignmentLog.Error("Patch_AddReportable.Postfix: " + e);
             }
         }
     }
 
     // Fires when a reporter physically returns to the tower and the state machine
     // transitions them to their desk-idle state - AFTER the completed story has been
-    // deposited (InteractingState.DoState drops item slot contents at the reporter's
-    // current position at the start of the state, which at this point is inside the
-    // building rather than in the street). Using OnUnassigned instead fired too early —
-    // the reporter was still physically in transit, causing the item dump to land on
-    // the street and triggering reassignment before delivery was complete.
+    // deposited.
     [HarmonyPatch(typeof(IdleWorkplaceState), "DoState")]
     static class Patch_IdleWorkplaceDoState
     {
@@ -61,35 +68,48 @@ namespace NewsTowerAutoAssign
 
         static void Prefix()
         {
-            float now = UnityEngine.Time.realtimeSinceStartup;
-            if (now - _lastScanTime < 1f)
-                return;
-            _lastScanTime = now;
-            AssignmentLog.Verbose("PATCH", "IdleWorkplaceState.DoState - rescanning");
-            AssignmentEvaluator.TryAutoAssignAll();
-            // Run the full test suite exactly once, and only when the game is
-            // in a state where every test CAN pass (QuestManager populated, at
-            // least one non-dummy ComposedQuest active, LiveReportableManager
-            // instantiated). Running earlier just produced SKIP noise.
-            InGameTests.InGameTestRunner.RunOnceWhenReady();
+            try
+            {
+                float now = UnityEngine.Time.realtimeSinceStartup;
+                if (now - _lastScanTime < 1f)
+                    return;
+                _lastScanTime = now;
+                AssignmentLog.Verbose("PATCH", "IdleWorkplaceState.DoState - rescanning");
+                AssignmentEvaluator.TryAutoAssignAll();
+#if DEBUG
+                // In-game tests are developer-only and are compiled out of
+                // Release builds. See NewsTowerAutoAssign.csproj for the
+                // Configuration-conditional Compile Remove that excludes
+                // InGameTests/** in Release.
+                InGameTests.InGameTestRunner.RunOnceWhenReady();
+#endif
+            }
+            catch (Exception e)
+            {
+                AssignmentLog.Error("Patch_IdleWorkplaceDoState.Prefix: " + e);
+            }
         }
     }
 
     // Fires when a save game is loaded - pay any outstanding bribes and scan all existing news items.
-    // Tests used to run here too, but composed quests aren't wired up yet on
-    // OnAfterLoadStart, so we defer the entire suite to the first idle rescan
-    // that finds live quest data. See InGameTestRunner.RunOnceWhenReady.
     [HarmonyPatch(typeof(LiveReportableManager), "OnAfterLoadStart")]
     static class Patch_AfterLoad
     {
         static void Postfix()
         {
-            AssignmentLog.Verbose("PATCH", "OnAfterLoadStart - scanning existing news");
-            if (LiveReportableManager.Instance != null)
-                foreach (var newsItem in LiveReportableManager.Instance.GetNewsItems().ToList())
-                    if (newsItem?.Data != null)
-                        BribeAutomation.TryPayBribes(newsItem);
-            AssignmentEvaluator.TryAutoAssignAll();
+            try
+            {
+                AssignmentLog.Verbose("PATCH", "OnAfterLoadStart - scanning existing news");
+                if (LiveReportableManager.Instance != null)
+                    foreach (var newsItem in LiveReportableManager.Instance.GetNewsItems().ToList())
+                        if (newsItem?.Data != null)
+                            BribeAutomation.TryPayBribes(newsItem);
+                AssignmentEvaluator.TryAutoAssignAll();
+            }
+            catch (Exception e)
+            {
+                AssignmentLog.Error("Patch_AfterLoad.Postfix: " + e);
+            }
         }
     }
 
@@ -102,51 +122,69 @@ namespace NewsTowerAutoAssign
     {
         static void Postfix(SuitcasePopup __instance)
         {
-            if (AutoAssignPlugin.AutoSkipSuitcasePopups.Value && __instance.IsBusy)
-                Traverse.Create(__instance).Field("didSkip").SetValue(true);
+            try
+            {
+                if (
+                    __instance != null
+                    && AutoAssignPlugin.AutoSkipSuitcasePopups.Value
+                    && __instance.IsBusy
+                )
+                    Traverse.Create(__instance).Field("didSkip").SetValue(true);
+            }
+            catch (Exception e)
+            {
+                AssignmentLog.Error("Patch_SuitcasePopupAutoSkip.Postfix: " + e);
+            }
         }
     }
 
     // Auto-dismisses risk spinner popups every frame so the player never has to click.
     // The risk outcome (None / Medium / Severe) is already decided and applied by the game
-    // before the popup opens - the spinner is purely cosmetic. Setting shouldSkip=true
-    // mirrors what RiskPopup.Update() does on any key/click, skipping the 4-5 second
-    // animation and completing the coroutine within a single frame.
+    // before the popup opens - the spinner is purely cosmetic.
     [HarmonyPatch(typeof(RiskPopup), "Update")]
     static class Patch_RiskPopupAutoSkip
     {
         static void Postfix(RiskPopup __instance)
         {
-            if (AutoAssignPlugin.AutoSkipRiskPopups.Value)
-                Traverse.Create(__instance).Field("shouldSkip").SetValue(true);
+            try
+            {
+                if (__instance != null && AutoAssignPlugin.AutoSkipRiskPopups.Value)
+                    Traverse.Create(__instance).Field("shouldSkip").SetValue(true);
+            }
+            catch (Exception e)
+            {
+                AssignmentLog.Error("Patch_RiskPopupAutoSkip.Postfix: " + e);
+            }
         }
     }
 
-    // Logs the resolved outcome of each risk popup exactly once. RiskPopup.Play is
-    // the single public entry point every concrete popup goes through (called by
-    // RiskPopupPlayer.Flush when the queue dequeues an arg bundle), and
-    // RiskPopupArgs carries the already-decided severity + risk type + employee
-    // context. RiskPopup itself does not know which NewsItem produced the risk,
-    // so we log the employee rather than a story name - this matches the game's
-    // own separation of concerns (severity is decided in NewsItemRisk.DecideSeverity
-    // and applied before the popup opens; the popup is purely cosmetic).
+    // Logs the resolved outcome of each risk popup exactly once.
+    // AssignmentLog.Decision is [Conditional("DEBUG")] so this is a no-op in
+    // Release builds - the patch itself remains installed but emits nothing.
     [HarmonyPatch(typeof(RiskPopup), "Play")]
     static class Patch_RiskPopupPlayLog
     {
         static void Prefix(RiskPopupArgs args)
         {
-            var riskName = args.riskType != null ? args.riskType.name : "?";
-            var employeeName = args.context != null ? args.context.name : "unassigned";
-            AssignmentLog.Decision(
-                "Risk resolution ("
-                    + riskName
-                    + ") for "
-                    + employeeName
-                    + ": severity="
-                    + args.severity
-                    + (args.isLucky ? " (lucky)" : "")
-                    + "."
-            );
+            try
+            {
+                var riskName = args.riskType != null ? args.riskType.name : "?";
+                var employeeName = args.context != null ? args.context.name : "unassigned";
+                AssignmentLog.Decision(
+                    "Risk resolution ("
+                        + riskName
+                        + ") for "
+                        + employeeName
+                        + ": severity="
+                        + args.severity
+                        + (args.isLucky ? " (lucky)" : "")
+                        + "."
+                );
+            }
+            catch (Exception e)
+            {
+                AssignmentLog.Error("Patch_RiskPopupPlayLog.Prefix: " + e);
+            }
         }
     }
 }

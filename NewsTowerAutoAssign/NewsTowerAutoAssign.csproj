@@ -3,37 +3,59 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>NewsTowerAutoAssign</AssemblyName>
     <Nullable>disable</Nullable>
-    <!-- Copy the built DLL straight into the plugins folder -->
-    <OutputPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\BepInEx\plugins\</OutputPath>
+    <LangVersion>latest</LangVersion>
+    <Configurations>Debug;Release</Configurations>
+
+    <!--
+      News Tower install root. Override from the command line or a
+      Directory.Build.props with:
+        dotnet build /p:NewsTowerPath="D:\SteamLibrary\steamapps\common\News Tower"
+      Defaults to the standard Steam location.
+    -->
+    <NewsTowerPath Condition="'$(NewsTowerPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\News Tower</NewsTowerPath>
+
+    <!--
+      In Debug builds we drop the DLL straight into the plugins folder so
+      the game picks it up on the next launch. In Release we keep the build
+      output inside the project's bin/Release folder so CI / distribution
+      scripts can pick it up without clobbering whatever is installed.
+    -->
+    <OutputPath Condition="'$(Configuration)' == 'Debug'">$(NewsTowerPath)\BepInEx\plugins\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
+
+  <!-- In-game test suite is a developer-only harness; compile it out of Release. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Compile Remove="InGameTests\**\*.cs" />
+    <None Include="InGameTests\**\*.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- BepInEx -->
     <Reference Include="BepInEx">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\BepInEx\core\BepInEx.dll</HintPath>
+      <HintPath>$(NewsTowerPath)\BepInEx\core\BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath>$(NewsTowerPath)\BepInEx\core\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
 
     <!-- Game assemblies -->
     <Reference Include="NewsTower">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\News Tower_Data\Managed\NewsTower.dll</HintPath>
+      <HintPath>$(NewsTowerPath)\News Tower_Data\Managed\NewsTower.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\News Tower_Data\Managed\UnityEngine.dll</HintPath>
+      <HintPath>$(NewsTowerPath)\News Tower_Data\Managed\UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\News Tower_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(NewsTowerPath)\News Tower_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.InputSystem">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\News Tower\News Tower_Data\Managed\Unity.InputSystem.dll</HintPath>
+      <HintPath>$(NewsTowerPath)\News Tower_Data\Managed\Unity.InputSystem.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

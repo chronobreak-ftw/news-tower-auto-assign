@@ -13,7 +13,7 @@ namespace NewsTowerAutoAssign
     // bypass Browsable still categorise them as "power user only". The .cfg
     // file on disk still works for my own testing. When we decide which knobs
     // real players should see, we'll drop the `Hidden` helper for just those.
-    [BepInPlugin("idontcare.autoassign", "News Auto Assign", "1.0.0")]
+    [BepInPlugin("evan.autoassign", "News Auto Assign", "1.0.0")]
     public class AutoAssignPlugin : BaseUnityPlugin
     {
         internal static ManualLogSource Log;
@@ -27,20 +27,36 @@ namespace NewsTowerAutoAssign
         internal static ConfigEntry<bool> AutoResolveBribeMinigame;
         internal static ConfigEntry<bool> DiscardFreshStoriesOnWeekend;
         internal static ConfigEntry<int> MinReportersToActivate;
+
+#if DEBUG
+        // Developer-only logging knobs. In Release builds AssignmentLog's
+        // non-error helpers are [Conditional("DEBUG")] no-ops, so these
+        // toggles have nothing to gate and are omitted from the .cfg file.
         internal static ConfigEntry<bool> VerboseLogs;
         internal static ConfigEntry<bool> OnlyLogTests;
+#endif
 
         private void Awake()
         {
             Log = BepInEx.Logging.Logger.CreateLogSource("AutoAssign");
-            BindConfig();
-            new Harmony("com.yourname.newstower.autoassign").PatchAll();
-            VerifyReflection();
-            AssignmentLog.Info(
-                "SYSTEM",
-                "Loaded and Harmony patches applied. Auto-assign is "
-                    + (AutoAssignEnabled.Value ? "enabled." : "disabled.")
-            );
+            try
+            {
+                BindConfig();
+                new Harmony("com.yourname.newstower.autoassign").PatchAll();
+                VerifyReflection();
+                AssignmentLog.Info(
+                    "SYSTEM",
+                    "Loaded and Harmony patches applied. Auto-assign is "
+                        + (AutoAssignEnabled.Value ? "enabled." : "disabled.")
+                );
+            }
+            catch (System.Exception e)
+            {
+                // A patch that fails to install is the single most dangerous
+                // thing we can do to someone's save. Log loudly and let the
+                // game continue unpatched rather than crash.
+                AssignmentLog.Error("Awake failed - auto-assign will not run this session: " + e);
+            }
         }
 
         // Builds a ConfigDescription that ConfigurationManager will hide from
@@ -121,11 +137,12 @@ namespace NewsTowerAutoAssign
             MinReportersToActivate = Config.Bind(
                 "Dev",
                 "MinReportersToActivate",
-                4,
+                3,
                 Hidden(
                     "Below this many globetrotter reporters the mod is fully passive (tutorial / early-game safety)."
                 )
             );
+#if DEBUG
             VerboseLogs = Config.Bind(
                 "Dev",
                 "VerboseLogs",
@@ -140,13 +157,18 @@ namespace NewsTowerAutoAssign
                     "Suppress every non-test log line. Only in-game test banners + PASS/FAIL/SKIP summaries print. Errors still fire."
                 )
             );
+#endif
         }
 
         private void VerifyReflection()
         {
+            // Real compat signal - fires when a game update renames or removes
+            // the field we reflect against. Routed through AssignmentLog.Error
+            // so it survives the Release-build log suppression and shows up
+            // in players' BepInEx logs for bug reports.
             if (!AssignmentEvaluator.ProgressDoneEventFieldAvailable)
-                Log.LogWarning(
-                    "REFLECTION: NewsItemStoryFile.progressDoneEvent not found - ghost-assignment detection disabled"
+                AssignmentLog.Error(
+                    "REFLECTION: NewsItemStoryFile.progressDoneEvent not found - ghost-assignment detection disabled. This usually means News Tower got a game update that renamed or removed the field."
                 );
         }
     }
