@@ -12,7 +12,8 @@
         dotnet build /p:NewsTowerPath="D:\SteamLibrary\steamapps\common\News Tower"
       Defaults to the standard Steam location.
     -->
-    <NewsTowerPath Condition="'$(NewsTowerPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\News Tower</NewsTowerPath>
+    <NewsTowerPath Condition="'$(NewsTowerPath)' == ''"
+      >C:\Program Files (x86)\Steam\steamapps\common\News Tower</NewsTowerPath>
 
     <!--
       In Debug builds we drop the DLL straight into the plugins folder so
@@ -20,7 +21,9 @@
       output inside the project's bin/Release folder so CI / distribution
       scripts can pick it up without clobbering whatever is installed.
     -->
-    <OutputPath Condition="'$(Configuration)' == 'Debug'">$(NewsTowerPath)\BepInEx\plugins\</OutputPath>
+    <OutputPath Condition="'$(Configuration)' == 'Debug'"
+      >$(NewsTowerPath)\BepInEx\plugins\</OutputPath
+    >
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 

@@ -115,7 +115,7 @@ namespace NewsTowerAutoAssign
                 "AutoSkipSuitcasePopups",
                 true,
                 Hidden(
-                    "Automatically dismiss the new-story suitcase popup. Locks the game until dismissed otherwise."
+                    "Automatically handle new-item suitcase rewards: pre-resolves unlocked suitcase nodes so the chain never stalls waiting for the player to view the story, and auto-skips the popup if it still manages to open. Unlock side-effect is identical to manual play (same DRNG draw)."
                 )
             );
             AutoResolveBribeMinigame = Config.Bind(

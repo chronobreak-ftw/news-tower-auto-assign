@@ -62,6 +62,11 @@ namespace NewsTowerAutoAssign
                     // Pay any bribe nodes that unlocked since the last scan
                     // (e.g. step 2 of a multi-step story that arrived before the weekend).
                     BribeAutomation.TryPayBribes(newsItem);
+                    // Same rationale for suitcase reward nodes: they unlock when the
+                    // chain reaches them but don't self-resolve until the player
+                    // makes the story visible. Proactively resolve so the chain
+                    // doesn't stall behind an unread "new item!" popup.
+                    SuitcaseAutomation.TryResolveSuitcases(newsItem);
                     AssignNewsItemCore(
                         newsItem,
                         quantityGoalTags,

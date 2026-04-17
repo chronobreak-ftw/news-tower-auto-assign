@@ -49,6 +49,7 @@ namespace NewsTowerAutoAssign
                 }
 #endif
                 BribeAutomation.TryPayBribes(newsItem);
+                SuitcaseAutomation.TryResolveSuitcases(newsItem);
                 AssignmentEvaluator.TryAssignNewsItem(newsItem);
             }
             catch (Exception e)
@@ -103,7 +104,10 @@ namespace NewsTowerAutoAssign
                 if (LiveReportableManager.Instance != null)
                     foreach (var newsItem in LiveReportableManager.Instance.GetNewsItems().ToList())
                         if (newsItem?.Data != null)
+                        {
                             BribeAutomation.TryPayBribes(newsItem);
+                            SuitcaseAutomation.TryResolveSuitcases(newsItem);
+                        }
                 AssignmentEvaluator.TryAutoAssignAll();
             }
             catch (Exception e)
