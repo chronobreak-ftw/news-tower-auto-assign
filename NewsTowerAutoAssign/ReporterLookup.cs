@@ -34,20 +34,26 @@ namespace NewsTowerAutoAssign
         // Single source of truth for "this is a live, playable reporter we can
         // reason about". All three reporter-scanning helpers below MUST use
         // this - anything less restrictive pulls in non-reporter employees.
-        private static bool IsPlayableReporter(Employee e)
+        private static bool IsPlayableReporter(Employee employee) =>
+            IsPlayableEmployee(employee) && employee.JobHandler.JobData.name == ReporterJobName;
+
+        // Same eligibility filters as IsPlayableReporter minus the Reporter-
+        // job-name check. Ads are worked by salespeople, editors, typesetters
+        // and assemblers - none of which pass the Reporter filter - so the
+        // ad path needs this job-agnostic variant while still rejecting
+        // not-yet-hired, hidden-drawer, and non-globetrotter employees.
+        private static bool IsPlayableEmployee(Employee employee)
         {
-            if (e == null)
+            if (employee == null)
                 return false;
-            if (!e.IsGlobetrotter)
+            if (!employee.IsGlobetrotter)
                 return false;
-            if (!e.IsInTower)
+            if (!employee.IsInTower)
                 return false;
-            var job = e.JobHandler?.JobData;
+            var job = employee.JobHandler?.JobData;
             if (job == null)
                 return false;
             if (job.hideFromDrawer)
-                return false;
-            if (job.name != ReporterJobName)
                 return false;
             return true;
         }
@@ -71,24 +77,8 @@ namespace NewsTowerAutoAssign
         // always returns true. Used to detect permanently unworkable paths
         // (building not built or roster simply lacks the skill) - not just
         // "everyone is temporarily busy".
-        internal static bool AnyReporterEverHasSkill(SkillData skill)
-        {
-            if (skill == null)
-                return true;
-            foreach (var e in Employee.Employees)
-            {
-                if (!IsPlayableReporter(e))
-                    continue;
-                // SkillHandler is conceptually a MonoBehaviour child of the
-                // employee and always present in a healthy game state, but
-                // mid-destruction it can be null. Skip rather than NRE.
-                if (e.SkillHandler == null)
-                    continue;
-                if (e.SkillHandler.HasSkillAndIsAssigned(skill))
-                    return true;
-            }
-            return false;
-        }
+        internal static bool AnyReporterEverHasSkill(SkillData skill) =>
+            AnyMatchingEmployee(skill, IsPlayableReporter);
 
         // Same as AnyReporterEverHasSkill but does NOT filter by Reporter
         // JobData. Ads are worked by salespeople, editors, typesetters,
@@ -98,24 +88,25 @@ namespace NewsTowerAutoAssign
         // because a hidden-drawer employee (tutorial NPC, etc.) or an
         // employee not yet in the tower cannot be assigned work in the
         // first place.
-        internal static bool AnyEmployeeEverHasSkill(SkillData skill)
+        internal static bool AnyEmployeeEverHasSkill(SkillData skill) =>
+            AnyMatchingEmployee(skill, IsPlayableEmployee);
+
+        // Shared body for AnyReporterEverHasSkill / AnyEmployeeEverHasSkill.
+        // Callers differ only in how they define "playable". SkillHandler is
+        // conceptually a MonoBehaviour child of the employee and always
+        // present in a healthy game state, but mid-destruction it can be
+        // null - skip rather than NRE.
+        private static bool AnyMatchingEmployee(SkillData skill, Func<Employee, bool> isPlayable)
         {
             if (skill == null)
                 return true;
-            foreach (var e in Employee.Employees)
+            foreach (var employee in Employee.Employees)
             {
-                if (e == null)
+                if (!isPlayable(employee))
                     continue;
-                if (!e.IsGlobetrotter)
+                if (employee.SkillHandler == null)
                     continue;
-                if (!e.IsInTower)
-                    continue;
-                var job = e.JobHandler?.JobData;
-                if (job == null || job.hideFromDrawer)
-                    continue;
-                if (e.SkillHandler == null)
-                    continue;
-                if (e.SkillHandler.HasSkillAndIsAssigned(skill))
+                if (employee.SkillHandler.HasSkillAndIsAssigned(skill))
                     return true;
             }
             return false;
@@ -135,24 +126,64 @@ namespace NewsTowerAutoAssign
             int minutes = (int)Math.Round(thresholdHours * 60f);
             var deadline = TowerTime.CurrentTime + TowerTimeDuration.FromMinutes(minutes);
 
-            foreach (var e in Employee.Employees)
+            foreach (var employee in Employee.Employees)
             {
-                if (!IsPlayableReporter(e))
+                if (!IsPlayableReporter(employee))
                     continue;
-                // Same null-safety rationale as AnyReporterEverHasSkill:
-                // these handlers are MonoBehaviour children and should always
-                // exist, but guarding the deref means a mid-destruction employee
-                // is silently skipped rather than NRE-ing the whole scan.
-                if (e.SkillHandler == null || e.TimeoutHandler == null)
+                // Same null-safety rationale as AnyMatchingEmployee: these
+                // handlers are MonoBehaviour children and should always
+                // exist, but guarding the deref means a mid-destruction
+                // employee is silently skipped rather than NRE-ing the
+                // whole scan.
+                if (employee.SkillHandler == null || employee.TimeoutHandler == null)
                     continue;
-                if (skill != null && !e.SkillHandler.HasSkillAndIsAssigned(skill))
+                if (skill != null && !employee.SkillHandler.HasSkillAndIsAssigned(skill))
                     continue;
-                if (!e.TimeoutHandler.IsTimedOut)
+                if (!employee.TimeoutHandler.IsTimedOut)
                     return true;
-                if (e.TimeoutHandler.GetReleaseTime() <= deadline)
+                if (employee.TimeoutHandler.GetReleaseTime() <= deadline)
                     return true;
             }
             return false;
+        }
+
+        // Pre-filtered, score-ordered pick of the single best-suited employee
+        // for the given skill. Returns null when nobody currently qualifies.
+        //
+        // The six-clause filter reproduces the exact gates the game applies
+        // when you drag an assignee onto a story-file / ad slot - assigning
+        // without them would either silently fail or surface UI errors:
+        //
+        //   * IsAvailableForGlobeAssignment       - not mid-workplace-task
+        //   * AssignableToReportable != null      - the pawn has a reportable
+        //     component at all (editors / tutorial NPCs do not)
+        //   * AssignableToReportable.Assignment   - slot-level dedupe; without
+        //     this we'd ghost-assign on top of an in-flight story
+        //   * SkillHandler != null                - mid-destruction safety
+        //   * skill == null || has skill          - the path's required skill
+        //   * JobData.hideFromDrawer == false     - tutorial / cutscene NPCs
+        //
+        // Ordering by GetSkillLevel descending means a path that requires
+        // "Investigative" prefers the 5-star investigator over a 1-star
+        // investigator; skill == null uses 0 for everyone so ties break on
+        // iteration order (effectively roster order).
+        //
+        // Null-safe against `employee` because mid-destruction iteration can
+        // surface a nulled entry in Employee.Employees.
+        internal static Employee PickBestAvailable(SkillData skill)
+        {
+            return Employee
+                .Employees.Where(employee =>
+                    employee != null
+                    && employee.IsAvailableForGlobeAssignment
+                    && employee.AssignableToReportable != null
+                    && employee.AssignableToReportable.Assignment == null
+                    && employee.SkillHandler != null
+                    && (skill == null || employee.SkillHandler.HasSkillAndIsAssigned(skill))
+                    && employee.JobHandler?.JobData?.hideFromDrawer == false
+                )
+                .OrderByDescending(employee => GetSkillLevel(employee, skill))
+                .FirstOrDefault();
         }
 
         // Returns the highest trained level of `skill` for `employee`, or 0 if the
@@ -167,8 +198,9 @@ namespace NewsTowerAutoAssign
             // abort the OrderBy for the whole roster.
             if (employee?.SkillHandler == null)
                 return 0;
-            Skill s;
-            return employee.SkillHandler.TryGetSkill(skill, out s) ? (int)s : 0;
+            return employee.SkillHandler.TryGetSkill(skill, out Skill trainedSkill)
+                ? (int)trainedSkill
+                : 0;
         }
 
         // Quest sources scanned:
@@ -338,7 +370,7 @@ namespace NewsTowerAutoAssign
                     + " ("
                     + QuestIdentityLabel(quest)
                     + ") → tags: ["
-                    + string.Join(", ", added.Select(t => t?.name ?? "null"))
+                    + string.Join(", ", added.Select(tag => tag?.name ?? "null"))
                     + "]"
             );
         }
@@ -424,28 +456,42 @@ namespace NewsTowerAutoAssign
 
             if (runtimeHits == 0 && composed.Data != null)
             {
-                foreach (var d in composed.Data.GetAllChildren<QuestCollectingRewardData>(true))
-                    AddTag(d.tagToCollect, quantity, addedOut);
-                foreach (var d in composed.Data.GetAllChildren<QuestCollectingComboData>(true))
-                    AddTag(d.tagToCollect, quantity, addedOut);
-                foreach (var d in composed.Data.GetAllChildren<QuestTargetSetRequirementData>(true))
+                foreach (
+                    var rewardData in composed.Data.GetAllChildren<QuestCollectingRewardData>(true)
+                )
+                    AddTag(rewardData.tagToCollect, quantity, addedOut);
+                foreach (
+                    var comboData in composed.Data.GetAllChildren<QuestCollectingComboData>(true)
+                )
+                    AddTag(comboData.tagToCollect, quantity, addedOut);
+                foreach (
+                    var targetSetData in composed.Data.GetAllChildren<QuestTargetSetRequirementData>(
+                        true
+                    )
+                )
                 {
-                    var protos = d.targets?.targets;
+                    var protos = targetSetData.targets?.targets;
                     if (protos == null)
                         continue;
-                    foreach (var pt in protos)
-                        AddBinaryTag(pt?.tag, quantity, binary, addedOut);
+                    foreach (var proto in protos)
+                        AddBinaryTag(proto?.tag, quantity, binary, addedOut);
                 }
                 foreach (
-                    var d in composed.Data.GetAllChildren<QuestTargetComboRequirementData>(true)
+                    var comboReqData in composed.Data.GetAllChildren<QuestTargetComboRequirementData>(
+                        true
+                    )
                 )
-                    AddBinaryTag(d.tag, quantity, binary, addedOut);
-                foreach (var d in composed.Data.GetAllChildren<QuestTopTagRequirementData>(true))
-                    AddBinaryTag(d.tag, quantity, binary, addedOut);
+                    AddBinaryTag(comboReqData.tag, quantity, binary, addedOut);
                 foreach (
-                    var d in composed.Data.GetAllChildren<QuestAboveTheFoldTagRequirementData>(true)
+                    var topTagData in composed.Data.GetAllChildren<QuestTopTagRequirementData>(true)
                 )
-                    AddBinaryTag(d.tag, quantity, binary, addedOut);
+                    AddBinaryTag(topTagData.tag, quantity, binary, addedOut);
+                foreach (
+                    var aboveTheFoldData in composed.Data.GetAllChildren<QuestAboveTheFoldTagRequirementData>(
+                        true
+                    )
+                )
+                    AddBinaryTag(aboveTheFoldData.tag, quantity, binary, addedOut);
             }
         }
 
@@ -499,8 +545,8 @@ namespace NewsTowerAutoAssign
             // Runtime tree - what ComposedQuest.Eval / UI strip iterate.
             var runtimeTypes = composed
                 .GetComponentsInChildren<object>(true)
-                .Select(o => o.GetType().Name)
-                .Where(n => n != "ComposedQuest")
+                .Select(child => child.GetType().Name)
+                .Where(typeName => typeName != "ComposedQuest")
                 .ToList();
             AssignmentLog.Verbose(
                 "GOALS",
@@ -519,7 +565,7 @@ namespace NewsTowerAutoAssign
             {
                 var dataTypes = composed
                     .Data.GetAllChildren<UnityEngine.Object>(false)
-                    .Select(o => o.GetType().Name)
+                    .Select(child => child.GetType().Name)
                     .ToList();
                 AssignmentLog.Verbose(
                     "GOALS",

@@ -33,6 +33,17 @@ namespace NewsTowerAutoAssign
     //     Prefix) - covers fresh-new-game starts where OnAfterLoadStart may not
     //     fire, and any scenario where the gate got stuck closed.
     //
+    // Threading
+    // ---------
+    // Unity and News Tower mutate game state exclusively on the main thread,
+    // and every Harmony patch we install runs on that same thread. This gate
+    // is therefore read / written on one thread only. `_isOpen` is NOT marked
+    // volatile: the cost of a memory barrier on every IsOpen read would be
+    // wasted, and a misuse from a background thread would fail the mod's own
+    // invariants long before reaching this flag. If we ever add a Task or a
+    // ThreadPool work item, revisit this assumption and pick between volatile
+    // reads or Interlocked.
+    //
     // Pure state; trivially unit testable (see NewsTowerAutoAssign.Tests).
     internal static class SafetyGate
     {

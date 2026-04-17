@@ -1,27 +1,39 @@
 # Auto-Assign Logic Rules
 
-## Quick Reference
+## Quick reference
 
 ### A story is kept and worked on if:
-- It has no risks
-- It's risky but matches one of your active weekly goals that isn't already covered by another story you're working on
-- You've already started working on it (a reporter was sent) - once invested, the mod never throws it away
-- It matches a weekly goal - the mod will wait as long as needed for the right reporter, even 12+ hours
+
+- It has no risks, or
+- It's risky but helps one of your active weekly goals that isn't already covered by another story you're working on, or
+- You've already started on it, or
+- It matches a weekly goal - the mod will wait as long as needed for the right reporter, even many in-game hours.
 
 ### A story is thrown away (discarded) if:
-- It's risky and doesn't match any of your current weekly goals
-- It requires a skill or building you don't have and can never complete - no point keeping it
-- It just arrived on Saturday or Sunday and nothing has been started on it yet (not enough time before the print deadline) and it does not match an uncovered goal
-- All your reporters with the right skill are too busy and won't be free for a while, and the story doesn't match any weekly goal, and you haven't started on it yet
+
+- It's risky and doesn't match any current weekly goal you still care about, or
+- It needs a skill or building you don't/can't have, or
+- It just showed up on Saturday or Sunday, you haven't started it, and it doesn't match an open goal (invested stories are exempt), or
+- Everyone who could do it is busy for longer than your "discard if nobody's free" threshold, the story doesn't match a goal, and you haven't invested yet.
 
 ### A bribe gets paid automatically if:
-- The setting is on (default: yes)
-- You can afford it - the cost is the same as if you clicked through the popup yourself
-- If you can't afford it, the mod leaves it for you to handle manually
 
-### Weekly goals change how the mod prioritizes, but don't block work:
-- A story that matches a goal gets picked over one that doesn't, all else equal
-- Scoop goals (competitor-contested districts, glowing tags) get the highest priority, but ONLY while the binary goal is still uncovered - once an in-progress story takes the scoop, other scoop-matching paths stop earning the bonus
-- Goals never cause a safe story to be skipped - they only break ties between options
+- The setting is on (default: yes), and
+- You can afford it.
+- If you can't afford it, the mod leaves the bribe for you.
+
+### Suitcase unlock nodes (news only)
+
+When a chain hits a suitcase step, the game often waits until you open the story in the newsbook. The mod can complete that unlock in the background on its periodic scan so reporters aren't blocked behind an invisible step.
+
+### How weekly goals change behavior
+
+- A story that matches a goal is preferred over one that doesn't when everything else is equal.
+- Scoop goals get the strongest tie-break.
+- Goals never cause a safe story to be skipped; they only break ties between options.
+
+### Ads
+
+Toggle: `AutoAssignAds` in `newstower.autoassign.cfg` (`[Dev]`). When on, open slots on the Ads board are filled with the best available staff who are eligible: correct skill, building unlocked, not busy, and the ad isn't under a boycott. If nobody is free, the ad stays for the next scan - there is no "discard" logic for ads.
 
 ---

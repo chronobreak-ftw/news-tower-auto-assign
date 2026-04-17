@@ -18,11 +18,15 @@ namespace NewsTowerAutoAssign
     // callsite, so no string concatenation cost is paid and the player's log
     // stays clean. Only `Error` still fires - if something genuinely breaks we
     // want a stack trace in the player's BepInEx log so bug reports are useful.
+    //
+    // Threading: every caller runs on the Unity main thread (Harmony prefixes /
+    // postfixes, MonoBehaviour ticks). The suppression set does not need locks.
+    // See SafetyGate.cs for the full threading-model rationale.
     internal static class AssignmentLog
     {
         // Deduplicate state-type decisions (kept risky, no reporter, etc.) per story.
         // Cleared whenever a real change happens for that story so messages re-log
-        // when conditions actually change.
+        // when conditions actually change. Main-thread-only.
         private static readonly HashSet<string> _suppressedDecisions = new HashSet<string>();
 
         [Conditional("DEBUG")]
@@ -81,7 +85,7 @@ namespace NewsTowerAutoAssign
         internal static void ClearSuppression(Reportable reportable)
         {
             var prefix = StoryId(reportable) + ":";
-            _suppressedDecisions.RemoveWhere(k => k.StartsWith(prefix));
+            _suppressedDecisions.RemoveWhere(key => key.StartsWith(prefix));
         }
 
         // Called from Patch_LRMAwake when a new LiveReportableManager spins
@@ -117,10 +121,10 @@ namespace NewsTowerAutoAssign
                 return "[]";
             var tags = newsItem
                 .Data.DistinctStatTypes.OfType<PlayerStatDataTag>()
-                .Where(t => t != null)
-                .Select(t => t.name)
+                .Where(tag => tag != null)
+                .Select(tag => tag.name)
                 .Distinct()
-                .OrderBy(s => s, StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
                 .ToArray();
             return tags.Length == 0 ? "[]" : "[" + string.Join(", ", tags) + "]";
         }
@@ -142,9 +146,9 @@ namespace NewsTowerAutoAssign
                     : string.Join(
                         ", ",
                         quantityGoalTags
-                            .Where(t => t != null)
-                            .Select(t => t.name)
-                            .OrderBy(s => s, StringComparer.Ordinal)
+                            .Where(tag => tag != null)
+                            .Select(tag => tag.name)
+                            .OrderBy(name => name, StringComparer.Ordinal)
                     );
             var binary =
                 binaryGoalTags == null || binaryGoalTags.Count == 0
@@ -152,12 +156,12 @@ namespace NewsTowerAutoAssign
                     : string.Join(
                         ", ",
                         binaryGoalTags
-                            .Where(t => t != null)
-                            .OrderBy(t => t.name, StringComparer.Ordinal)
-                            .Select(t =>
-                                t.name
+                            .Where(tag => tag != null)
+                            .OrderBy(tag => tag.name, StringComparer.Ordinal)
+                            .Select(tag =>
+                                tag.name
                                 + (
-                                    inProgressTags != null && inProgressTags.Contains(t)
+                                    inProgressTags != null && inProgressTags.Contains(tag)
                                         ? "(covered)"
                                         : "(uncovered)"
                                 )

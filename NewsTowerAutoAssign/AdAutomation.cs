@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using _Game._Common;
 using Assigner;
 using Employees;
@@ -9,6 +8,7 @@ using GlobalNews;
 using Persons;
 using Reportables;
 using Reportables.News;
+using Skills;
 
 namespace NewsTowerAutoAssign
 {
@@ -32,21 +32,13 @@ namespace NewsTowerAutoAssign
     // AutoAssignAds toggle is the only kill switch.
     internal static class AdAutomation
     {
-        // Reentrancy guard. AssignTo can re-enter our scan via Harmony patches
-        // on downstream events; without this we'd start a second pass before
-        // the first finished and double-assign. Mirrors AssignmentEvaluator.
+        // Reentrancy guard. Main-thread-only: Harmony patches fire on the
+        // Unity main thread, so a non-volatile bool is sufficient. Do not
+        // touch from a background thread. Mirrors AssignmentEvaluator.
         private static bool _isAssigning;
 
-        // Same reflection target the evaluator uses to detect a slot that
-        // already has a job running but hasn't been marked completed yet
-        // (the "ghost assignment" symptom). Probed at startup by the plugin.
-        private static readonly FieldInfo _progressDoneEventField =
-            typeof(NewsItemStoryFile).GetField(
-                "progressDoneEvent",
-                BindingFlags.NonPublic | BindingFlags.Instance
-            );
-
-        internal static bool ProgressDoneEventFieldAvailable => _progressDoneEventField != null;
+        internal static bool ProgressDoneEventFieldAvailable =>
+            GameReflection.ProgressDoneEventFieldAvailable;
 
         internal static void TryAssignAds()
         {
@@ -65,9 +57,9 @@ namespace NewsTowerAutoAssign
                 foreach (var ad in LiveReportableManager.Instance.OnAdBoard.ToList())
                     TryAssignAdInternal(ad);
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("AdAutomation.TryAssignAds: " + e);
+                AssignmentLog.Error("AdAutomation.TryAssignAds: " + ex);
             }
             finally
             {
@@ -98,9 +90,9 @@ namespace NewsTowerAutoAssign
             {
                 TryAssignAdInternal(ad);
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("AdAutomation.TryAssignAd: " + e);
+                AssignmentLog.Error("AdAutomation.TryAssignAd: " + ex);
             }
             finally
             {
@@ -130,88 +122,25 @@ namespace NewsTowerAutoAssign
                 TryAssignAdStoryFile(ad, storyFile);
         }
 
+        // Orchestrator for a single ad slot. Mirrors the news path
+        // (TryAssignSingleSlot) but with ad-specific reason strings and no
+        // story-level context (goal tags / in-progress sets are news-only).
         private static void TryAssignAdStoryFile(Ad ad, NewsItemStoryFile storyFile)
         {
-            if (storyFile == null)
-                return;
-            if (storyFile.IsCompleted)
-                return;
-            if (
-                _progressDoneEventField != null
-                && _progressDoneEventField.GetValue(storyFile) != null
-            )
+            if (!IsSlotAssignable(storyFile))
                 return;
 
             var skill = storyFile.AssignSkill;
-            if (skill != null)
-            {
-                // Mirror the evaluator's preflight: don't try to assign work
-                // whose required building isn't built yet, and don't waste a
-                // scan trying to find a skill nobody on the roster has. These
-                // also keep the log clean of "no eligible employee" spam for
-                // ads the player physically can't service yet.
-                //
-                // Important difference from the news path: ads are worked by
-                // salespeople / editors / typesetters / assemblers, not
-                // reporters. ReporterLookup.AnyReporterEverHasSkill filters
-                // on JobData.name == "Reporter" and would silently reject
-                // every ad skill. Use the job-agnostic variant instead.
-                if (!AssetUnlocker.IsUnlockedSafe(skill))
-                {
-                    AssignmentLog.DecisionOnce(
-                        ad,
-                        "ad_building_missing_" + skill.skillName,
-                        "Ad '"
-                            + AdName(ad)
-                            + "' → WAIT (ad): required building for '"
-                            + skill.skillName
-                            + "' not built yet (ad kept, will retry when unlocked)."
-                    );
-                    return;
-                }
-                if (!ReporterLookup.AnyEmployeeEverHasSkill(skill))
-                {
-                    AssignmentLog.DecisionOnce(
-                        ad,
-                        "ad_no_skill_" + skill.skillName,
-                        "Ad '"
-                            + AdName(ad)
-                            + "' → WAIT (ad): no employee on the roster has '"
-                            + skill.skillName
-                            + "' trained (ad kept, will retry after hiring)."
-                    );
-                    return;
-                }
-            }
+            if (!SkillIsAvailableForAd(ad, skill))
+                return;
 
-            // Same employee filter the evaluator uses for news. Every
-            // dereference is null-guarded so a partially-destroyed or
-            // mid-hire Employee can't NRE in the LINQ predicate and
-            // abort the whole ad scan.
-            var employee = Employee
-                .Employees.Where(e =>
-                    e != null
-                    && e.IsAvailableForGlobeAssignment
-                    && e.AssignableToReportable != null
-                    && e.AssignableToReportable.Assignment == null
-                    && e.SkillHandler != null
-                    && (skill == null || e.SkillHandler.HasSkillAndIsAssigned(skill))
-                    && e.JobHandler?.JobData?.hideFromDrawer == false
-                )
-                .OrderByDescending(e => ReporterLookup.GetSkillLevel(e, skill))
-                .FirstOrDefault();
-
+            // Same filter the evaluator uses for news. See
+            // ReporterLookup.PickBestAvailable for the clause-by-clause
+            // explanation of why each gate is necessary.
+            var employee = ReporterLookup.PickBestAvailable(skill);
             if (employee == null)
             {
-                AssignmentLog.DecisionOnce(
-                    ad,
-                    "ad_no_employee_" + (skill?.skillName ?? "any"),
-                    "Ad '"
-                        + AdName(ad)
-                        + "' → WAIT (no employee): all "
-                        + (skill != null ? "'" + skill.skillName + "'" : "eligible")
-                        + " staff busy right now (ad kept, will retry)."
-                );
+                LogNoAdEmployeeAvailable(ad, skill);
                 return;
             }
 
@@ -220,42 +149,120 @@ namespace NewsTowerAutoAssign
             // ghosts (employee marked busy, no progressDoneEvent created).
             storyFile.OnVisibilityChanged(true);
 
-            bool canAssign = storyFile.CanAssignHandlers.All(h => h.CanAssign(employee));
-            if (!canAssign)
-            {
-                if (storyFile.Node?.NodeState == NewsItemNodeState.Locked)
-                {
-                    AssignmentLog.Verbose(
-                        "AD",
-                        "Ad branch locked (sibling chosen) ["
-                            + (skill?.skillName ?? "any")
-                            + "] for "
-                            + AdName(ad)
-                            + "."
-                    );
-                }
-                else
-                {
-                    AssignmentLog.Warn(
-                        "AD",
-                        "  -> AD PRE-FLIGHT FAIL for "
-                            + employee.name
-                            + " ["
-                            + (skill?.skillName ?? "any")
-                            + "]"
-                            + " | NodeState="
-                            + storyFile.Node?.NodeState
-                            + " IsCompleted="
-                            + storyFile.IsCompleted
-                            + " HasSkill="
-                            + (skill == null || employee.SkillHandler.HasSkillAndIsAssigned(skill))
-                            + " AvailableForGlobe="
-                            + employee.IsAvailableForGlobeAssignment
-                    );
-                }
+            if (!PassesAdPreFlight(storyFile, employee, skill, ad))
                 return;
-            }
 
+            CommitAdAssignment(ad, storyFile, employee, skill);
+        }
+
+        // Cheap gates for skipping slots that are finished, null, or already
+        // running. Kept separate from TryAssignAdStoryFile so the top-level
+        // flow reads as a sequence of question-shaped helpers.
+        private static bool IsSlotAssignable(NewsItemStoryFile storyFile) =>
+            storyFile != null
+            && !storyFile.IsCompleted
+            && !GameReflection.IsSlotAlreadyRunning(storyFile);
+
+        // Mirror the evaluator's preflight: don't try to assign work whose
+        // required building isn't built yet, and don't waste a scan trying
+        // to find a skill nobody on the roster has. Ads use the job-agnostic
+        // employee check (ads are worked by salespeople / editors /
+        // typesetters / assemblers, not reporters; the Reporter-only check
+        // would silently reject every ad skill).
+        private static bool SkillIsAvailableForAd(Ad ad, SkillData skill)
+        {
+            if (skill == null)
+                return true;
+            if (!AssetUnlocker.IsUnlockedSafe(skill))
+            {
+                AssignmentLog.DecisionOnce(
+                    ad,
+                    "ad_building_missing_" + skill.skillName,
+                    "Ad '"
+                        + AdName(ad)
+                        + "' → WAIT (ad): required building for '"
+                        + skill.skillName
+                        + "' not built yet (ad kept, will retry when unlocked)."
+                );
+                return false;
+            }
+            if (!ReporterLookup.AnyEmployeeEverHasSkill(skill))
+            {
+                AssignmentLog.DecisionOnce(
+                    ad,
+                    "ad_no_skill_" + skill.skillName,
+                    "Ad '"
+                        + AdName(ad)
+                        + "' → WAIT (ad): no employee on the roster has '"
+                        + skill.skillName
+                        + "' trained (ad kept, will retry after hiring)."
+                );
+                return false;
+            }
+            return true;
+        }
+
+        private static void LogNoAdEmployeeAvailable(Ad ad, SkillData skill)
+        {
+            AssignmentLog.DecisionOnce(
+                ad,
+                "ad_no_employee_" + (skill?.skillName ?? "any"),
+                "Ad '"
+                    + AdName(ad)
+                    + "' → WAIT (no employee): all "
+                    + (skill != null ? "'" + skill.skillName + "'" : "eligible")
+                    + " staff busy right now (ad kept, will retry)."
+            );
+        }
+
+        // Ad-flavoured equivalent of AssignmentEvaluator.PassesPreFlight.
+        private static bool PassesAdPreFlight(
+            NewsItemStoryFile storyFile,
+            Employee employee,
+            SkillData skill,
+            Ad ad
+        )
+        {
+            if (storyFile.CanAssignHandlers.All(handler => handler.CanAssign(employee)))
+                return true;
+            if (storyFile.Node?.NodeState == NewsItemNodeState.Locked)
+            {
+                AssignmentLog.Verbose(
+                    "AD",
+                    "Ad branch locked (sibling chosen) ["
+                        + (skill?.skillName ?? "any")
+                        + "] for "
+                        + AdName(ad)
+                        + "."
+                );
+                return false;
+            }
+            AssignmentLog.Warn(
+                "AD",
+                "  -> AD PRE-FLIGHT FAIL for "
+                    + employee.name
+                    + " ["
+                    + (skill?.skillName ?? "any")
+                    + "]"
+                    + " | NodeState="
+                    + storyFile.Node?.NodeState
+                    + " IsCompleted="
+                    + storyFile.IsCompleted
+                    + " HasSkill="
+                    + (skill == null || employee.SkillHandler.HasSkillAndIsAssigned(skill))
+                    + " AvailableForGlobe="
+                    + employee.IsAvailableForGlobeAssignment
+            );
+            return false;
+        }
+
+        private static void CommitAdAssignment(
+            Ad ad,
+            NewsItemStoryFile storyFile,
+            Employee employee,
+            SkillData skill
+        )
+        {
             AssignmentLog.ClearSuppression(ad);
             AssignmentLog.Decision(
                 "Ad '"
@@ -282,11 +289,12 @@ namespace NewsTowerAutoAssign
                 if (!string.IsNullOrEmpty(title))
                     return title;
             }
-            catch
+            catch (Exception)
             {
                 // Title can throw on partially-initialised ads (e.g. mid-load
-                // before company / mutable refs are resolved). Falling back is
-                // fine for log purposes.
+                // before company / mutable refs are resolved). Falling back
+                // to the AdData asset name is fine for log purposes and we
+                // don't need the exception detail here.
             }
             return ad.Data != null ? ad.Data.name : "?";
         }

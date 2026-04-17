@@ -45,14 +45,15 @@ namespace NewsTowerAutoAssign
             {
                 SafetyGate.Close();
                 AssignmentLog.ResetForNewSave();
+                BribeAutomation.ResetForNewSave();
                 AssignmentLog.Verbose(
                     "PATCH",
-                    "LiveReportableManager.Awake - SafetyGate closed, decision log reset"
+                    "LiveReportableManager.Awake - SafetyGate closed, decision log + bribe cache reset"
                 );
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_LRMAwake.Postfix: " + e);
+                AssignmentLog.Error("Patch_LRMAwake.Postfix: " + ex);
             }
         }
     }
@@ -71,50 +72,60 @@ namespace NewsTowerAutoAssign
                 // Handle them on a separate path so the news-only logic
                 // (bribes, goal chasing, weekend discard) doesn't fire
                 // against an Ad reportable that lacks those concerns.
-                var ad = reportable as Ad;
-                if (ad != null)
+                if (reportable is Ad ad)
                 {
                     AdAutomation.TryAssignAd(ad);
                     return;
                 }
-
-                var newsItem = reportable as NewsItem;
-                if (newsItem?.Data == null)
-                    return;
-
-#if DEBUG
-                if (AutoAssignPlugin.VerboseLogs != null && AutoAssignPlugin.VerboseLogs.Value)
-                {
-                    var tagNames = newsItem
-                        .Data.DistinctStatTypes.OfType<PlayerStatDataTag>()
-                        .Select(t => t.name)
-                        .ToList();
-                    AssignmentLog.Verbose(
-                        "TAGS",
-                        AssignmentLog.StoryName(newsItem)
-                            + " → ["
-                            + (tagNames.Count > 0 ? string.Join(", ", tagNames) : "none")
-                            + "]"
-                    );
-                }
-#endif
-                BribeAutomation.TryPayBribes(newsItem);
-                // Deliberately NOT calling SuitcaseAutomation here. AddReportable
-                // fires per-story during save-load BEFORE BuildUnlockListManager
-                // has restored its `lists` dict; calling UnlockItem now would
-                // create a fresh entry that AddFromLoadGame later collides with
-                // (Dictionary.Add throws on duplicate keys - surfaces as an
-                // in-game "Load Error: An item with the same key has already
-                // been added"). At genuine mid-game AddReportable time the
-                // suitcase's node is Locked (prereqs unmet) so there is nothing
-                // to resolve anyway - the periodic TryAutoAssignAll scan picks
-                // it up the moment the node unlocks.
-                AssignmentEvaluator.TryAssignNewsItem(newsItem);
+                if (reportable is NewsItem newsItem && newsItem.Data != null)
+                    HandleAddedNewsItem(newsItem);
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_AddReportable.Postfix: " + e);
+                AssignmentLog.Error("Patch_AddReportable.Postfix: " + ex);
             }
+        }
+
+        // Debug-only tag dump for the new story, then pay any pre-armed
+        // bribes, then fire the evaluator. Deliberately NOT calling
+        // SuitcaseAutomation here. AddReportable fires per-story during
+        // save-load BEFORE BuildUnlockListManager has restored its `lists`
+        // dict; calling UnlockItem now would create a fresh entry that
+        // AddFromLoadGame later collides with (Dictionary.Add throws on
+        // duplicate keys - surfaces as an in-game "Load Error: An item
+        // with the same key has already been added"). At genuine mid-game
+        // AddReportable time the suitcase's node is Locked (prereqs
+        // unmet) so there is nothing to resolve anyway - the periodic
+        // TryAutoAssignAll scan picks it up the moment the node unlocks.
+        private static void HandleAddedNewsItem(NewsItem newsItem)
+        {
+            LogStoryTags(newsItem);
+            BribeAutomation.TryPayBribes(newsItem);
+            AssignmentEvaluator.TryAssignNewsItem(newsItem);
+        }
+
+        [System.Diagnostics.Conditional("DEBUG")]
+        private static void LogStoryTags(NewsItem newsItem)
+        {
+#if DEBUG
+            // VerboseLogs only exists in DEBUG builds. The Conditional
+            // attribute elides calls to this method in Release, so the body
+            // wrapper is belt-and-braces: callers never reach this in
+            // Release, but the body still has to compile.
+            if (AutoAssignPlugin.VerboseLogs == null || !AutoAssignPlugin.VerboseLogs.Value)
+                return;
+            var tagNames = newsItem
+                .Data.DistinctStatTypes.OfType<PlayerStatDataTag>()
+                .Select(statTag => statTag.name)
+                .ToList();
+            AssignmentLog.Verbose(
+                "TAGS",
+                AssignmentLog.StoryName(newsItem)
+                    + " → ["
+                    + (tagNames.Count > 0 ? string.Join(", ", tagNames) : "none")
+                    + "]"
+            );
+#endif
         }
     }
 
@@ -124,6 +135,18 @@ namespace NewsTowerAutoAssign
     [HarmonyPatch(typeof(IdleWorkplaceState), "DoState")]
     static class Patch_IdleWorkplaceDoState
     {
+        // Minimum real-time spacing between full-board scans. Idle states
+        // tick every frame (~60Hz); scanning that often would blow the
+        // decision-log cooldowns and burn CPU walking the transform graph
+        // for nothing. One second is comfortably under any assignment
+        // latency a player can perceive while giving us a ~60x reduction
+        // in scan rate.
+        private const float MinScanIntervalSeconds = 1f;
+
+        // Main-thread-only: IdleWorkplaceState.DoState ticks from Unity's
+        // MonoBehaviour update loop, so this single-reader/single-writer
+        // throttle doesn't need volatile or Interlocked. See SafetyGate for
+        // the full threading-model rationale.
         private static float _lastScanTime = 0f;
 
         static void Prefix()
@@ -131,7 +154,7 @@ namespace NewsTowerAutoAssign
             try
             {
                 float now = UnityEngine.Time.realtimeSinceStartup;
-                if (now - _lastScanTime < 1f)
+                if (now - _lastScanTime < MinScanIntervalSeconds)
                     return;
                 _lastScanTime = now;
                 // Workers ticking their idle state = game is running past any
@@ -150,9 +173,9 @@ namespace NewsTowerAutoAssign
                 InGameTests.InGameTestRunner.RunOnceWhenReady();
 #endif
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_IdleWorkplaceDoState.Prefix: " + e);
+                AssignmentLog.Error("Patch_IdleWorkplaceDoState.Prefix: " + ex);
             }
         }
     }
@@ -186,9 +209,9 @@ namespace NewsTowerAutoAssign
                 AssignmentEvaluator.TryAutoAssignAll();
                 AdAutomation.TryAssignAds();
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_AfterLoad.Postfix: " + e);
+                AssignmentLog.Error("Patch_AfterLoad.Postfix: " + ex);
             }
         }
     }
@@ -211,9 +234,9 @@ namespace NewsTowerAutoAssign
                 )
                     Traverse.Create(__instance).Field("didSkip").SetValue(true);
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_SuitcasePopupAutoSkip.Postfix: " + e);
+                AssignmentLog.Error("Patch_SuitcasePopupAutoSkip.Postfix: " + ex);
             }
         }
     }
@@ -231,9 +254,9 @@ namespace NewsTowerAutoAssign
                 if (__instance != null && AutoAssignPlugin.AutoSkipRiskPopups.Value)
                     Traverse.Create(__instance).Field("shouldSkip").SetValue(true);
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_RiskPopupAutoSkip.Postfix: " + e);
+                AssignmentLog.Error("Patch_RiskPopupAutoSkip.Postfix: " + ex);
             }
         }
     }
@@ -248,6 +271,12 @@ namespace NewsTowerAutoAssign
         {
             try
             {
+                // RiskPopupArgs is a struct so the value itself can't be
+                // null, but its inner Unity references can be - guard each
+                // before touching `.name`. Unity's overloaded == treats a
+                // Destroyed object as equal to null, so this also covers
+                // mid-destruction races where riskType / context have been
+                // torn down between AI decision and popup invocation.
                 var riskName = args.riskType != null ? args.riskType.name : "?";
                 var employeeName = args.context != null ? args.context.name : "unassigned";
                 AssignmentLog.Decision(
@@ -261,9 +290,9 @@ namespace NewsTowerAutoAssign
                         + "."
                 );
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                AssignmentLog.Error("Patch_RiskPopupPlayLog.Prefix: " + e);
+                AssignmentLog.Error("Patch_RiskPopupPlayLog.Prefix: " + ex);
             }
         }
     }

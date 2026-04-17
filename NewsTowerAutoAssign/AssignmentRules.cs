@@ -4,6 +4,34 @@ using System.Linq;
 
 namespace NewsTowerAutoAssign
 {
+    // Priority score for a story-file path given the current goal landscape.
+    // Declared as an int-backed enum so the numeric ordering is meaningful
+    // (`>` / `<` comparisons are preserved) AND the name reads in log output.
+    internal enum PathPriority
+    {
+        // No goal match - the path yields nothing the mod is chasing.
+        None = -1,
+
+        // Path matches a binary goal that an in-progress story already covers.
+        // Still surfaced so multi-path stories can pick it over None, but it's
+        // effectively wasted work from a goal-chasing POV.
+        CoveredBinary = 0,
+
+        // Path advances a scaling-reward (quantity) goal - more tagged copies
+        // keep producing more reward, so always worth chasing even if another
+        // in-progress story already matches.
+        Quantity = 1,
+
+        // Path advances a binary (threshold) goal that nothing on the board
+        // has yet covered. Standard "go grab that uncovered check mark".
+        UncoveredBinary = 2,
+
+        // Path advances an uncovered binary goal AND the tag is scoop-required
+        // AND this path's yield qualifies as a scoop - the highest-value
+        // assignment we can make.
+        UncoveredScoop = 3,
+    }
+
     // Pure rules used by the assignment evaluator. Generic on the tag type so the
     // NUnit test project can exercise the logic without referencing game DLLs -
     // tests use `string` as TTag, runtime callers use PlayerStatDataTag.
@@ -20,20 +48,12 @@ namespace NewsTowerAutoAssign
             HashSet<TTag> inProgressTags
         )
         {
-            return storyTags.Any(t =>
-                quantityGoalTags.Contains(t)
-                || (binaryGoalTags.Contains(t) && !inProgressTags.Contains(t))
+            return storyTags.Any(tag =>
+                quantityGoalTags.Contains(tag)
+                || (binaryGoalTags.Contains(tag) && !inProgressTags.Contains(tag))
             );
         }
 
-        // Priority score for a story-file path given the current goal landscape.
-        //   3 = binary goal uncovered + scoop-required + path.IsScoop (highest)
-        //   2 = binary goal uncovered (regular threshold we haven't claimed yet)
-        //   1 = quantity goal (scaling reward; still worth chasing even if
-        //       another in-progress story covers it)
-        //   0 = binary goal already covered (stacking wastes work)
-        //  -1 = no match
-        //
         // Scoop priority requires the tag to still be uncovered - once we've
         // already assigned a story that matches the scoop tag, the district
         // goal is on the rails and further scoop-matching paths just duplicate
@@ -41,7 +61,7 @@ namespace NewsTowerAutoAssign
         //
         // isScoop is a delegate so this class doesn't need a reference to
         // NewsItemStoryFile; callers bind it to storyFile.IsScoop(tag) at runtime.
-        internal static int GetPathGoalPriority<TTag>(
+        internal static PathPriority GetPathGoalPriority<TTag>(
             IEnumerable<TTag> yieldTags,
             HashSet<TTag> quantityGoalTags,
             HashSet<TTag> scoopGoalTags,
@@ -61,7 +81,7 @@ namespace NewsTowerAutoAssign
 
         // Same scoring as GetPathGoalPriority; labels are the distinct yield tags that
         // achieved the winning score (for log lines). formatTag maps each tag to a name.
-        internal static (int priority, string[] labels) GetPathGoalPriorityDetail<TTag>(
+        internal static (PathPriority priority, string[] labels) GetPathGoalPriorityDetail<TTag>(
             IEnumerable<TTag> yieldTags,
             HashSet<TTag> quantityGoalTags,
             HashSet<TTag> scoopGoalTags,
@@ -71,23 +91,23 @@ namespace NewsTowerAutoAssign
             Func<TTag, string> formatTag
         )
         {
-            int best = -1;
+            var best = PathPriority.None;
             var atBest = new List<TTag>();
             foreach (var tag in yieldTags)
             {
                 if (tag == null)
                     continue;
-                int score;
+                PathPriority score;
                 bool binaryUncovered =
                     binaryGoalTags.Contains(tag) && !inProgressTags.Contains(tag);
                 if (binaryUncovered && scoopGoalTags.Contains(tag) && isScoop(tag))
-                    score = 3;
+                    score = PathPriority.UncoveredScoop;
                 else if (binaryUncovered)
-                    score = 2;
+                    score = PathPriority.UncoveredBinary;
                 else if (quantityGoalTags.Contains(tag))
-                    score = 1;
+                    score = PathPriority.Quantity;
                 else if (binaryGoalTags.Contains(tag))
-                    score = 0;
+                    score = PathPriority.CoveredBinary;
                 else
                     continue;
 
@@ -100,18 +120,18 @@ namespace NewsTowerAutoAssign
                 else if (score == best)
                     atBest.Add(tag);
 
-                if (best == 3)
+                if (best == PathPriority.UncoveredScoop)
                     break;
             }
 
-            if (best < 0)
-                return (-1, Array.Empty<string>());
+            if (best == PathPriority.None)
+                return (PathPriority.None, Array.Empty<string>());
 
             var labels = atBest
-                .Select(t => formatTag(t))
-                .Where(s => !string.IsNullOrEmpty(s))
+                .Select(tag => formatTag(tag))
+                .Where(label => !string.IsNullOrEmpty(label))
                 .Distinct()
-                .OrderBy(s => s, StringComparer.Ordinal)
+                .OrderBy(label => label, StringComparer.Ordinal)
                 .ToArray();
             return (best, labels);
         }

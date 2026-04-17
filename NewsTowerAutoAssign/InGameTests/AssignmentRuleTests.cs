@@ -83,7 +83,7 @@ namespace NewsTowerAutoAssign.InGameTests
         {
             var empty = new HashSet<PlayerStatDataTag>();
 
-            // No yield tags → always -1
+            // No yield tags → always PathPriority.None
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
                     Enumerable.Empty<PlayerStatDataTag>(),
@@ -92,8 +92,8 @@ namespace NewsTowerAutoAssign.InGameTests
                     empty,
                     empty,
                     _ => false
-                ) == -1,
-                "no tags → priority -1"
+                ) == PathPriority.None,
+                "no tags → PathPriority.None"
             );
 
             if (LiveReportableManager.Instance == null)
@@ -112,7 +112,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     continue;
                 foreach (var sf in newsItem.GetComponentsInChildren<NewsItemStoryFile>(true))
                 {
-                    int pri = AssignmentRules.GetPathGoalPriority(
+                    var pri = AssignmentRules.GetPathGoalPriority(
                         sf.BaseYieldDistinctStatTypes.OfType<PlayerStatDataTag>(),
                         quantity,
                         scoop,
@@ -121,8 +121,9 @@ namespace NewsTowerAutoAssign.InGameTests
                         tag => sf.IsScoop(tag)
                     );
                     ctx.Assert(
-                        pri >= -1 && pri <= 3,
-                        "priority in [-1,3] for path " + (sf.AssignSkill?.skillName ?? "any"),
+                        pri >= PathPriority.None && pri <= PathPriority.UncoveredScoop,
+                        "priority in valid PathPriority range for path "
+                            + (sf.AssignSkill?.skillName ?? "any"),
                         "got " + pri
                     );
                     tested++;

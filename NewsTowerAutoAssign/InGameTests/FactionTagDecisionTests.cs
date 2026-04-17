@@ -63,8 +63,8 @@ namespace NewsTowerAutoAssign.InGameTests
                 "binary tag already in progress → no longer a match (prevents doubling up)"
             );
 
-            // Binary-only path should score priority 2 (binary rung, not quantity=1 or scoop=3).
-            int priority = AssignmentRules.GetPathGoalPriority(
+            // Binary-only path should score UncoveredBinary (not Quantity, not UncoveredScoop).
+            var priority = AssignmentRules.GetPathGoalPriority(
                 storyTags,
                 quantity,
                 new HashSet<string>(),
@@ -72,7 +72,11 @@ namespace NewsTowerAutoAssign.InGameTests
                 inProgressUncovered,
                 _ => false
             );
-            ctx.Assert(priority == 2, "binary-only path priority = 2", "got " + priority);
+            ctx.Assert(
+                priority == PathPriority.UncoveredBinary,
+                "binary-only path priority = UncoveredBinary",
+                "got " + priority
+            );
 
             // All three discard gates must respect the match when matchesUncovered is true.
             ctx.Assert(

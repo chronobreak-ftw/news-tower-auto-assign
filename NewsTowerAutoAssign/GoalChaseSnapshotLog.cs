@@ -5,13 +5,18 @@ using Tower_Stats;
 namespace NewsTowerAutoAssign
 {
     // Emits a single [GOALS] Info line when the in-game period changes (new week /
-    // month per TowerTime) or when quest-derived tag sets change, so players always
-    // see what the mod is chasing without enabling VerboseLogs.
+    // month per TowerTime) or when quest-derived tag sets change - DEBUG-only.
+    //
+    // Every log route in this class goes through AssignmentLog.Info, which is
+    // [Conditional("DEBUG")], so Release builds emit nothing and pay no string-
+    // concatenation cost. That matches the mod's release-build logging policy:
+    // only errors and warnings survive in the player's BepInEx log.
     internal static class GoalChaseSnapshotLog
     {
         private static int _lastPeriodLogged = int.MinValue;
         private static string _lastFingerprint = "";
 
+        [System.Diagnostics.Conditional("DEBUG")]
         internal static void MaybeLog(
             bool chaseGoalsEnabled,
             HashSet<PlayerStatDataTag> quantity,
@@ -41,14 +46,14 @@ namespace NewsTowerAutoAssign
                         + period
                         + " ("
                         + date
-                        + "): ChaseGoals is off — no goal-based prioritization."
+                        + "): ChaseGoals is off - no goal-based prioritization."
                 );
                 return;
             }
 
-            string q = FormatTagNames(quantity);
-            string s = FormatTagNames(scoop);
-            string b = FormatTagNames(binary);
+            string quantityNames = FormatTagNames(quantity);
+            string scoopNames = FormatTagNames(scoop);
+            string binaryNames = FormatTagNames(binary);
             AssignmentLog.Info(
                 "GOALS",
                 "Period "
@@ -56,11 +61,11 @@ namespace NewsTowerAutoAssign
                     + " ("
                     + date
                     + "): chasing quantity (scaling reward) ["
-                    + (string.IsNullOrEmpty(q) ? "none" : q)
+                    + (string.IsNullOrEmpty(quantityNames) ? "none" : quantityNames)
                     + "]; scoop-required ["
-                    + (string.IsNullOrEmpty(s) ? "none" : s)
+                    + (string.IsNullOrEmpty(scoopNames) ? "none" : scoopNames)
                     + "]; binary (threshold) ["
-                    + (string.IsNullOrEmpty(b) ? "none" : b)
+                    + (string.IsNullOrEmpty(binaryNames) ? "none" : binaryNames)
                     + "]."
             );
         }
@@ -87,7 +92,10 @@ namespace NewsTowerAutoAssign
                 return "";
             return string.Join(
                 ", ",
-                tags.Where(t => t != null).Select(t => t.name).Distinct().OrderBy(n => n)
+                tags.Where(tag => tag != null)
+                    .Select(tag => tag.name)
+                    .Distinct()
+                    .OrderBy(name => name)
             );
         }
     }

@@ -13,9 +13,31 @@ namespace NewsTowerAutoAssign
     // bypass Browsable still categorise them as "power user only". The .cfg
     // file on disk still works for my own testing. When we decide which knobs
     // real players should see, we'll drop the `Hidden` helper for just those.
-    [BepInPlugin("newstower.autoassign", "News Tower Auto Assign", "1.0.1")]
+    [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class AutoAssignPlugin : BaseUnityPlugin
     {
+        // Kept as constants so the Harmony instance id, BepInPlugin metadata,
+        // and any future "tell me your version" diagnostic all agree by
+        // construction. Bump PluginVersion in one place per release.
+        private const string PluginGuid = "newstower.autoassign";
+        private const string PluginName = "News Tower Auto Assign";
+        private const string PluginVersion = "1.0.1";
+
+        // Harmony instance id. Distinct from PluginGuid deliberately - the
+        // reverse-domain string here matches the namespace convention other
+        // mods use for their Harmony ids and is already on the wire for
+        // anyone monitoring Harmony patch ownership.
+        private const string HarmonyId = "com.yourname.newstower.autoassign";
+
+        // Default values for configuration entries. Duplicated from the
+        // summary review recommendation: any default that's ever tuned
+        // lives as a named constant so the code reads as intent rather
+        // than magic numbers.
+        private const float DefaultDiscardIfNoReporterHours = 4.0f;
+        private const int DefaultMinReportersToActivate = 3;
+
+        private const string ConfigSection = "Dev";
+
         internal static ManualLogSource Log;
 
         internal static ConfigEntry<bool> AutoAssignEnabled;
@@ -43,7 +65,7 @@ namespace NewsTowerAutoAssign
             try
             {
                 BindConfig();
-                new Harmony("com.yourname.newstower.autoassign").PatchAll();
+                new Harmony(HarmonyId).PatchAll();
                 VerifyReflection();
                 AssignmentLog.Info(
                     "SYSTEM",
@@ -51,12 +73,12 @@ namespace NewsTowerAutoAssign
                         + (AutoAssignEnabled.Value ? "enabled." : "disabled.")
                 );
             }
-            catch (System.Exception e)
+            catch (System.Exception ex)
             {
                 // A patch that fails to install is the single most dangerous
                 // thing we can do to someone's save. Log loudly and let the
                 // game continue unpatched rather than crash.
-                AssignmentLog.Error("Awake failed - auto-assign will not run this session: " + e);
+                AssignmentLog.Error("Awake failed - auto-assign will not run this session: " + ex);
             }
         }
 
@@ -71,143 +93,156 @@ namespace NewsTowerAutoAssign
                 new ConfigurationManagerAttributes { Browsable = false, IsAdvanced = true }
             );
 
+        // Top-level splitter - each helper binds a cohesive group of knobs.
+        // Kept explicit rather than reflection-driven so deleting an entry
+        // that other code reads fails the compile immediately.
         private void BindConfig()
         {
-            AutoAssignEnabled = Config.Bind(
-                "Dev",
+            BindNewsAutomationConfig();
+            BindPopupAutomationConfig();
+            BindAdAutomationConfig();
+            BindDebugConfig();
+        }
+
+        // News-side automation: master enable, goal-chase, risk avoidance,
+        // weekend / availability discard thresholds, and the early-game
+        // passivity gate.
+        private void BindNewsAutomationConfig()
+        {
+            AutoAssignEnabled = BindHidden(
                 "Enabled",
                 true,
-                Hidden("Automatically assign reporters to news items when they appear.")
+                "Automatically assign reporters to news items when they appear."
             );
-            ChaseGoalsEnabled = Config.Bind(
-                "Dev",
+            ChaseGoalsEnabled = BindHidden(
                 "ChaseGoals",
                 true,
-                Hidden(
-                    "Prefer story file paths whose skill matches a current weekly goal tag (does not skip stories)."
-                )
+                "Prefer story file paths whose skill matches a current weekly goal tag (does not skip stories)."
             );
-            AvoidRisksEnabled = Config.Bind(
-                "Dev",
+            AvoidRisksEnabled = BindHidden(
                 "AvoidRisks",
                 true,
-                Hidden(
-                    "Skip risky news items (Injury, Lawsuit, etc.) unless they also match a weekly goal."
-                )
+                "Skip risky news items (Injury, Lawsuit, etc.) unless they also match a weekly goal."
             );
-            DiscardIfNoReporterForHours = Config.Bind(
-                "Dev",
+            DiscardIfNoReporterForHours = BindHidden(
                 "DiscardIfNoReporterForHours",
-                4.0f,
-                Hidden(
-                    "Discard a news item if no reporter with the right skill will be free within this many in-game hours (0 = disabled). Fractional values honoured."
-                )
+                DefaultDiscardIfNoReporterHours,
+                "Discard a news item if no reporter with the right skill will be free within this many in-game hours (0 = disabled). Fractional values honoured."
             );
-            AutoSkipRiskPopups = Config.Bind(
-                "Dev",
-                "AutoSkipRiskPopups",
-                true,
-                Hidden(
-                    "Automatically dismiss risk spinner popups. Outcome is identical; the popup is cosmetic."
-                )
-            );
-            AutoSkipSuitcasePopups = Config.Bind(
-                "Dev",
-                "AutoSkipSuitcasePopups",
-                true,
-                Hidden(
-                    "Automatically handle new-item suitcase rewards: pre-resolves unlocked suitcase nodes so the chain never stalls waiting for the player to view the story, and auto-skips the popup if it still manages to open. Unlock side-effect is identical to manual play (same DRNG draw)."
-                )
-            );
-            AutoResolveBribeMinigame = Config.Bind(
-                "Dev",
-                "AutoResolveBribeMinigame",
-                true,
-                Hidden(
-                    "Automatically pay bribe nodes when affordable. Cost matches manual play (same DRNG call). Left for manual handling if not affordable."
-                )
-            );
-            DiscardFreshStoriesOnWeekend = Config.Bind(
-                "Dev",
+            DiscardFreshStoriesOnWeekend = BindHidden(
                 "DiscardFreshStoriesOnWeekend",
                 true,
-                Hidden(
-                    "Discard fresh (unstarted) stories that arrive on Saturday or Sunday - not enough time to finish. Invested stories never discarded here."
-                )
+                "Discard fresh (unstarted) stories that arrive on Saturday or Sunday - not enough time to finish. Invested stories never discarded here."
             );
-            MinReportersToActivate = Config.Bind(
-                "Dev",
+            MinReportersToActivate = BindHidden(
                 "MinReportersToActivate",
-                3,
-                Hidden(
-                    "Below this many reporters the mod is fully passive (tutorial / early-game safety)."
-                )
+                DefaultMinReportersToActivate,
+                "Below this many reporters the mod is fully passive (tutorial / early-game safety)."
             );
-            AutoAssignAds = Config.Bind(
-                "Dev",
+        }
+
+        // Popup suppression + direct resolution for the three modal popups
+        // that would otherwise block the auto-assign loop.
+        private void BindPopupAutomationConfig()
+        {
+            AutoSkipRiskPopups = BindHidden(
+                "AutoSkipRiskPopups",
+                true,
+                "Automatically dismiss risk spinner popups. Outcome is identical; the popup is cosmetic."
+            );
+            AutoSkipSuitcasePopups = BindHidden(
+                "AutoSkipSuitcasePopups",
+                true,
+                "Automatically handle new-item suitcase rewards: pre-resolves unlocked suitcase nodes so the chain never stalls waiting for the player to view the story, and auto-skips the popup if it still manages to open. Unlock side-effect is identical to manual play (same DRNG draw)."
+            );
+            AutoResolveBribeMinigame = BindHidden(
+                "AutoResolveBribeMinigame",
+                true,
+                "Automatically pay bribe nodes when affordable. Cost matches manual play (same DRNG call). Left for manual handling if not affordable."
+            );
+        }
+
+        // Ad-side automation. Currently one knob - future ad-specific
+        // settings (skill overrides, deadline respects) go here.
+        private void BindAdAutomationConfig()
+        {
+            AutoAssignAds = BindHidden(
                 "AutoAssignAds",
                 true,
-                Hidden(
-                    "Automatically assign idle staff to ads on the Ads tab. Uses the same "
-                        + "skill-matching logic as the news automation - whoever has the right "
-                        + "skill and is free gets the work. Boycotted ads are skipped. The "
-                        + "MinReportersToActivate gate does NOT apply to ads."
-                )
+                "Automatically assign idle staff to ads on the Ads tab. Uses the same "
+                    + "skill-matching logic as the news automation - whoever has the right "
+                    + "skill and is free gets the work. Boycotted ads are skipped. The "
+                    + "MinReportersToActivate gate does NOT apply to ads."
             );
+        }
+
+        // Developer-only knobs. Conditional-compiled out of Release builds
+        // entirely because the code paths they gate (AssignmentLog.Verbose,
+        // test-only log filtering) are [Conditional("DEBUG")].
+        private void BindDebugConfig()
+        {
 #if DEBUG
-            VerboseLogs = Config.Bind(
-                "Dev",
+            VerboseLogs = BindHidden(
                 "VerboseLogs",
                 false,
-                Hidden("Enable low-level diagnostic logs. Intended for bug reports.")
+                "Enable low-level diagnostic logs. Intended for bug reports."
             );
-            OnlyLogTests = Config.Bind(
-                "Dev",
+            OnlyLogTests = BindHidden(
                 "OnlyLogTests",
                 false,
-                Hidden(
-                    "Suppress every non-test log line. Only in-game test banners + PASS/FAIL/SKIP summaries print. Errors still fire."
-                )
+                "Suppress every non-test log line. Only in-game test banners + PASS/FAIL/SKIP summaries print. Errors still fire."
             );
 #endif
         }
 
+        // Typed overloads so every bind site reads like
+        //   X = BindHidden("Key", default, "Description.");
+        // rather than the Section / ConfigDescription ceremony. Section is
+        // fixed at ConfigSection ("Dev") for every developer knob below.
+        private ConfigEntry<bool> BindHidden(string key, bool defaultValue, string description) =>
+            Config.Bind(ConfigSection, key, defaultValue, Hidden(description));
+
+        private ConfigEntry<int> BindHidden(string key, int defaultValue, string description) =>
+            Config.Bind(ConfigSection, key, defaultValue, Hidden(description));
+
+        private ConfigEntry<float> BindHidden(string key, float defaultValue, string description) =>
+            Config.Bind(ConfigSection, key, defaultValue, Hidden(description));
+
+        // Every reflection target in the mod is probed at startup rather than
+        // lazily at first use so a game-update compat regression surfaces once
+        // at plugin load rather than once per scan target (which would be
+        // noisy) and independent of whether the relevant automation ever fires
+        // in the player's session. Every error below is routed through
+        // AssignmentLog.Error so it survives Release-build log suppression.
         private void VerifyReflection()
         {
-            // Real compat signal - fires when a game update renames or removes
-            // the field we reflect against. Routed through AssignmentLog.Error
-            // so it survives the Release-build log suppression and shows up
-            // in players' BepInEx logs for bug reports.
-            //
-            // Every reflection target in the mod is probed at startup rather
-            // than lazily at first use, so a game-update compat regression
-            // surfaces once at plugin load rather than once per scan target
-            // (which would be noisy) and independent of whether the relevant
-            // automation ever fires in the player's session.
-            if (!AssignmentEvaluator.ProgressDoneEventFieldAvailable)
-                AssignmentLog.Error(
-                    "REFLECTION: NewsItemStoryFile.progressDoneEvent not found - ghost-assignment detection disabled. This usually means News Tower got a game update that renamed or removed the field."
-                );
-            // AdAutomation re-uses the same private field by reflection; if
-            // the news-side probe found it then this one will too, but we
-            // probe independently so a future refactor that splits the field
-            // surfaces here too.
-            if (!AdAutomation.ProgressDoneEventFieldAvailable)
-                AssignmentLog.Error(
-                    "REFLECTION: NewsItemStoryFile.progressDoneEvent not found from AdAutomation - ad ghost-assignment detection disabled."
-                );
+            VerifyProgressDoneEventReflection();
+            VerifySuitcaseReflection();
+        }
 
+        private static void VerifyProgressDoneEventReflection()
+        {
+            if (GameReflection.ProgressDoneEventFieldAvailable)
+                return;
+            AssignmentLog.Error(
+                "REFLECTION: NewsItemStoryFile.progressDoneEvent not found - ghost-assignment detection disabled. This usually means News Tower got a game update that renamed or removed the field."
+            );
+        }
+
+        private static void VerifySuitcaseReflection()
+        {
             var (suitcaseType, missingSuitcaseMembers) =
                 SuitcaseAutomation.ProbeReflectionTargets();
-            if (missingSuitcaseMembers != null && missingSuitcaseMembers.Length > 0)
-                AssignmentLog.Error(
-                    "REFLECTION: SuitcaseAutomation cannot find ["
-                        + string.Join(", ", missingSuitcaseMembers)
-                        + "] on "
-                        + suitcaseType
-                        + " - suitcase auto-resolve will no-op this session. "
-                        + "Likely a News Tower game update; file a bug report including the game version."
-                );
+            if (missingSuitcaseMembers == null || missingSuitcaseMembers.Length == 0)
+                return;
+            AssignmentLog.Error(
+                "REFLECTION: SuitcaseAutomation cannot find ["
+                    + string.Join(", ", missingSuitcaseMembers)
+                    + "] on "
+                    + suitcaseType
+                    + " - suitcase auto-resolve will no-op this session. "
+                    + "Likely a News Tower game update; file a bug report including the game version."
+            );
         }
     }
 }

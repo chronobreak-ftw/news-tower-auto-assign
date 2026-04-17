@@ -43,6 +43,26 @@ namespace NewsTowerAutoAssign
         private static readonly Dictionary<Type, PropertyInfo> _didActPropertyCache =
             new Dictionary<Type, PropertyInfo>();
 
+        // Types we've already reported a reflection miss for. AssignmentLog.Error
+        // is NOT [Conditional("DEBUG")], so without this set a game update that
+        // renames UnlockItem / DidAct would spam the player's BepInEx log once
+        // per idle-state scan, forever. Reported once per (type, member) pair.
+        private static readonly HashSet<string> _reportedReflectionMisses = new HashSet<string>();
+
+        // Binding flags are shared between the startup probe and the per-type
+        // resolution below so they can't drift apart. `FlattenHierarchy` is
+        // required for DidAct because the property is declared on the generic
+        // base NewsItemSuitcase<TData>.
+        private const BindingFlags UnlockItemFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+        private const BindingFlags DidActFlags =
+            BindingFlags.Instance
+            | BindingFlags.Public
+            | BindingFlags.NonPublic
+            | BindingFlags.FlattenHierarchy;
+
+        private const string UnlockItemMethodName = "UnlockItem";
+        private const string DidActPropertyName = "DidAct";
+
         // Used by AutoAssignPlugin.VerifyReflection to surface "a game update
         // renamed the abstract NewsItemSuitcase.UnlockItem / DidAct members"
         // at plugin load time rather than at first-suitcase scan. Returns the
@@ -55,22 +75,11 @@ namespace NewsTowerAutoAssign
             // rename in the game would fail the compile (loud) rather than
             // silently returning "<not-found>" at runtime (quiet).
             var suitcaseType = typeof(NewsItemSuitcaseBuildable);
-            var missing = new System.Collections.Generic.List<string>();
-            var unlockItem = suitcaseType.GetMethod(
-                "UnlockItem",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
-            if (unlockItem == null)
-                missing.Add("UnlockItem");
-            var didAct = suitcaseType.GetProperty(
-                "DidAct",
-                BindingFlags.Instance
-                    | BindingFlags.Public
-                    | BindingFlags.NonPublic
-                    | BindingFlags.FlattenHierarchy
-            );
-            if (didAct == null)
-                missing.Add("DidAct");
+            var missing = new List<string>();
+            if (suitcaseType.GetMethod(UnlockItemMethodName, UnlockItemFlags) == null)
+                missing.Add(UnlockItemMethodName);
+            if (suitcaseType.GetProperty(DidActPropertyName, DidActFlags) == null)
+                missing.Add(DidActPropertyName);
             return (suitcaseType.FullName, missing.ToArray());
         }
 
@@ -95,94 +104,9 @@ namespace NewsTowerAutoAssign
                         true
                     )
                 )
-                {
-                    if (suitcase == null || suitcase.IsCompleted || suitcase.DidAct)
-                        continue;
-
-                    var node = suitcase.Node;
-                    if (node == null || node.NodeState != NewsItemNodeState.Unlocked)
-                        continue;
-
-                    var type = suitcase.GetType();
-
-                    if (!_unlockItemMethodCache.TryGetValue(type, out var unlockItem))
-                    {
-                        unlockItem = type.GetMethod(
-                            "UnlockItem",
-                            BindingFlags.Instance | BindingFlags.NonPublic
-                        );
-                        _unlockItemMethodCache[type] = unlockItem;
-                    }
-                    if (unlockItem == null)
-                    {
-                        // A game update renamed or removed the member we rely on.
-                        // Surface once via Error (survives Release-build log
-                        // suppression) and skip - leaving the suitcase for manual
-                        // resolution is strictly safer than throwing mid-scan.
-                        AssignmentLog.Error(
-                            "SuitcaseAutomation: UnlockItem method not found on "
-                                + type.FullName
-                                + " - suitcase auto-resolve disabled for this type this session."
-                        );
-                        continue;
-                    }
-
-                    if (!_didActPropertyCache.TryGetValue(type, out var didActProp))
-                    {
-                        didActProp = type.GetProperty(
-                            "DidAct",
-                            BindingFlags.Instance
-                                | BindingFlags.Public
-                                | BindingFlags.NonPublic
-                                | BindingFlags.FlattenHierarchy
-                        );
-                        _didActPropertyCache[type] = didActProp;
-                    }
-                    if (didActProp == null)
-                    {
-                        AssignmentLog.Error(
-                            "SuitcaseAutomation: DidAct property not found on "
-                                + type.FullName
-                                + " - suitcase auto-resolve disabled for this type this session."
-                        );
-                        continue;
-                    }
-
-                    // Order mirrors the game's own flow in OnVisibilityChanged:
-                    // DidAct -> UnlockItem -> IsCompleted. Setting DidAct first is
-                    // important because some subscribers to the visibility-triggered
-                    // state check it mid-unlock and would otherwise re-enter.
-                    didActProp.SetValue(suitcase, true, null);
-                    unlockItem.Invoke(suitcase, null);
-                    suitcase.IsCompleted = true;
-
-                    AssignmentLog.ClearSuppression(newsItem);
-                    string itemName;
-                    try
-                    {
-                        itemName =
-                            suitcase.UnlockedItem != null
-                                ? (
-                                    suitcase.UnlockedItem.UnlocalizedBuildname_Safe
-                                    ?? suitcase.UnlockedItem.name
-                                )
-                                : "<list empty>";
-                    }
-                    catch
-                    {
-                        itemName = "<unnamed>";
-                    }
-                    AssignmentLog.Decision(
-                        AssignmentLog.StoryName(newsItem)
-                            + " "
-                            + AssignmentLog.StoryTagList(newsItem)
-                            + " → ITEM UNLOCKED: "
-                            + itemName
-                            + " (suitcase node auto-resolved, chain unblocked)."
-                    );
-                }
+                    TryResolveSuitcase(newsItem, suitcase);
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
                 // Reflection / Unity component walks on an in-flight story can
                 // surface transient nulls - log once and move on rather than
@@ -191,9 +115,133 @@ namespace NewsTowerAutoAssign
                     "SuitcaseAutomation.TryResolveSuitcases("
                         + AssignmentLog.StoryName(newsItem)
                         + "): "
-                        + e
+                        + ex
                 );
             }
+        }
+
+        // Per-suitcase flow: skip when already resolved or not unlocked,
+        // resolve reflection handles (cached), apply the "act" sequence in
+        // the exact order the game's own OnVisibilityChanged uses, then log.
+        private static void TryResolveSuitcase(
+            NewsItem newsItem,
+            NewsItemSuitcaseBuildable suitcase
+        )
+        {
+            if (!IsSuitcaseResolvable(suitcase))
+                return;
+
+            var type = suitcase.GetType();
+            var unlockItem = ResolveUnlockItem(type);
+            if (unlockItem == null)
+                return;
+            var didActProp = ResolveDidAct(type);
+            if (didActProp == null)
+                return;
+
+            ApplyActSequence(suitcase, unlockItem, didActProp);
+            LogItemUnlocked(newsItem, suitcase);
+        }
+
+        private static bool IsSuitcaseResolvable(NewsItemSuitcaseBuildable suitcase)
+        {
+            if (suitcase == null || suitcase.IsCompleted || suitcase.DidAct)
+                return false;
+            var node = suitcase.Node;
+            return node != null && node.NodeState == NewsItemNodeState.Unlocked;
+        }
+
+        // Order mirrors the game's own flow in OnVisibilityChanged:
+        // DidAct -> UnlockItem -> IsCompleted. Setting DidAct first is
+        // important because some subscribers to the visibility-triggered
+        // state check it mid-unlock and would otherwise re-enter.
+        private static void ApplyActSequence(
+            NewsItemSuitcaseBuildable suitcase,
+            MethodInfo unlockItem,
+            PropertyInfo didActProp
+        )
+        {
+            didActProp.SetValue(suitcase, true, null);
+            unlockItem.Invoke(suitcase, null);
+            suitcase.IsCompleted = true;
+        }
+
+        private static void LogItemUnlocked(NewsItem newsItem, NewsItemSuitcaseBuildable suitcase)
+        {
+            AssignmentLog.ClearSuppression(newsItem);
+            AssignmentLog.Decision(
+                AssignmentLog.StoryName(newsItem)
+                    + " "
+                    + AssignmentLog.StoryTagList(newsItem)
+                    + " → ITEM UNLOCKED: "
+                    + GetUnlockedItemName(suitcase)
+                    + " (suitcase node auto-resolved, chain unblocked)."
+            );
+        }
+
+        // Best-effort name for the log line. UnlockedItem accessors can throw
+        // on partially-initialised assets during early load; we fall back to
+        // a placeholder rather than let the exception abort the log.
+        private static string GetUnlockedItemName(NewsItemSuitcaseBuildable suitcase)
+        {
+            try
+            {
+                if (suitcase.UnlockedItem == null)
+                    return "<list empty>";
+                return suitcase.UnlockedItem.UnlocalizedBuildname_Safe
+                    ?? suitcase.UnlockedItem.name;
+            }
+            catch (Exception)
+            {
+                return "<unnamed>";
+            }
+        }
+
+        // Looks up the private UnlockItem method for a concrete suitcase type
+        // and caches the result (including a null cache-entry on miss so we
+        // don't repeat the reflection lookup every scan).
+        //
+        // Emits an Error log exactly once per type so a game update that
+        // rename/removes the member is visible at the first scan and then
+        // stays quiet - Error is NOT stripped in Release.
+        private static MethodInfo ResolveUnlockItem(Type type)
+        {
+            if (!_unlockItemMethodCache.TryGetValue(type, out var method))
+            {
+                method = type.GetMethod(UnlockItemMethodName, UnlockItemFlags);
+                _unlockItemMethodCache[type] = method;
+            }
+            if (method == null)
+                ReportReflectionMissOnce(type, UnlockItemMethodName);
+            return method;
+        }
+
+        // Same contract as ResolveUnlockItem, but for the DidAct property on
+        // the generic base NewsItemSuitcase<TData>.
+        private static PropertyInfo ResolveDidAct(Type type)
+        {
+            if (!_didActPropertyCache.TryGetValue(type, out var property))
+            {
+                property = type.GetProperty(DidActPropertyName, DidActFlags);
+                _didActPropertyCache[type] = property;
+            }
+            if (property == null)
+                ReportReflectionMissOnce(type, DidActPropertyName);
+            return property;
+        }
+
+        private static void ReportReflectionMissOnce(Type type, string memberName)
+        {
+            string key = type.FullName + "." + memberName;
+            if (!_reportedReflectionMisses.Add(key))
+                return;
+            AssignmentLog.Error(
+                "SuitcaseAutomation: "
+                    + memberName
+                    + " not found on "
+                    + type.FullName
+                    + " - suitcase auto-resolve disabled for this type this session."
+            );
         }
     }
 }

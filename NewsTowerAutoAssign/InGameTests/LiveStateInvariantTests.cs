@@ -83,7 +83,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     "invested not weekend-discarded: " + name
                 );
 
-                // For availability: anyReporterSoon=true because the story is already running —
+                // For availability: anyReporterSoon=true because the story is already running -
                 // this always keeps, confirming the predicate honours the invested flag.
                 ctx.Assert(
                     !DiscardPredicates.ShouldDiscardForAvailability(
