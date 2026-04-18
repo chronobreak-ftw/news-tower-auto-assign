@@ -57,6 +57,22 @@ namespace NewsTowerAutoAssign
         // reuse numbers drawn against the old save's DRNG state.
         internal static void ResetForNewSave() => _pendingCosts.Clear();
 
+        // When bribe auto-pay is disabled, any news item that still has an incomplete
+        // bribe node is left entirely to the player: no auto-assign, discards,
+        // suitcase unlock, or bribe payment until every bribe on the item is
+        // completed or destroyed.
+        internal static bool StoryIsPlayerBribeControlled(NewsItem newsItem)
+        {
+            if (newsItem == null || AutoAssignPlugin.AutoResolveBribes.Value)
+                return false;
+            foreach (var bribe in newsItem.GetComponentsInChildren<NewsItemBribeComponent>(true))
+            {
+                if (bribe != null && !bribe.IsCompleted && !bribe.IsDestroyed)
+                    return true;
+            }
+            return false;
+        }
+
         internal static void TryPayBribes(NewsItem newsItem)
         {
             if (!IsBribeAutomationReady(newsItem, out var difficulty))
@@ -97,7 +113,7 @@ namespace NewsTowerAutoAssign
         )
         {
             difficulty = null;
-            if (!AutoAssignPlugin.AutoResolveBribeMinigame.Value || newsItem == null)
+            if (!AutoAssignPlugin.AutoResolveBribes.Value || newsItem == null)
                 return false;
             if (!SafetyGate.IsOpen)
                 return false;

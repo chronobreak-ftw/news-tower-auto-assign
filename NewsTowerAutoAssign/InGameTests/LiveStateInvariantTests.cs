@@ -71,6 +71,7 @@ namespace NewsTowerAutoAssign.InGameTests
                 ctx.Assert(
                     !DiscardPredicates.ShouldDiscardForRisk(
                         AutoAssignPlugin.AvoidRisksEnabled.Value,
+                        AutoAssignPlugin.ChaseGoalsEnabled.Value,
                         isInvested,
                         goalsLoaded,
                         hasRisk,

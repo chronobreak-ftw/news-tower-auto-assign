@@ -40,18 +40,18 @@ namespace NewsTowerAutoAssign
 
         internal static ManualLogSource Log;
 
-        internal static ConfigEntry<bool> AutoAssignEnabled;
-        internal static ConfigEntry<bool> ChaseGoalsEnabled;
-        internal static ConfigEntry<bool> AvoidRisksEnabled;
-        internal static ConfigEntry<float> DiscardIfNoReporterForHours;
-        internal static ConfigEntry<bool> AutoSkipRiskPopups;
-        internal static ConfigEntry<bool> AutoSkipSuitcasePopups;
-        internal static ConfigEntry<bool> AutoResolveBribeMinigame;
-        internal static ConfigEntry<bool> DiscardFreshStoriesOnWeekend;
-        internal static ConfigEntry<int> MinReportersToActivate;
         internal static ConfigEntry<bool> AutoAssignAds;
         internal static ConfigEntry<bool> AutoAssignOnlyObviousPath;
+        internal static ConfigEntry<bool> AutoResolveBribes;
+        internal static ConfigEntry<bool> AutoSkipRiskPopups;
+        internal static ConfigEntry<bool> AutoSkipSuitcasePopups;
+        internal static ConfigEntry<bool> AvoidRisksEnabled;
+        internal static ConfigEntry<bool> ChaseGoalsEnabled;
+        internal static ConfigEntry<bool> DiscardFreshStoriesOnWeekend;
+        internal static ConfigEntry<float> DiscardIfNoReporterForHours;
+        internal static ConfigEntry<bool> AutoAssignEnabled;
         internal static ConfigEntry<bool> GlobePinOwnershipEnabled;
+        internal static ConfigEntry<int> MinReportersToActivate;
 
 #if DEBUG
         // Developer-only logging knobs. In Release builds AssignmentLog's
@@ -67,6 +67,8 @@ namespace NewsTowerAutoAssign
             try
             {
                 BindConfig();
+                ClampMinReportersToActivate();
+                MinReportersToActivate.SettingChanged += (_, __) => ClampMinReportersToActivate();
                 new Harmony(HarmonyId).PatchAll();
                 VerifyReflection();
                 AssignmentLog.Info(
@@ -95,84 +97,15 @@ namespace NewsTowerAutoAssign
                 new ConfigurationManagerAttributes { Browsable = false, IsAdvanced = true }
             );
 
-        // Top-level splitter - each helper binds a cohesive group of knobs.
-        // Kept explicit rather than reflection-driven so deleting an entry
-        // that other code reads fails the compile immediately.
+        // Binds every [Dev] key (alphabetical in BindDevSectionConfig) plus DEBUG-only entries.
         private void BindConfig()
         {
-            BindNewsAutomationConfig();
-            BindPopupAutomationConfig();
-            BindAdAutomationConfig();
-            BindGlobeOwnershipConfig();
+            BindDevSectionConfig();
             BindDebugConfig();
         }
 
-        // News-side automation: master enable, goal-chase, risk avoidance,
-        // weekend / availability discard thresholds, and the early-game
-        // passivity gate.
-        private void BindNewsAutomationConfig()
-        {
-            AutoAssignEnabled = BindHidden(
-                "Enabled",
-                true,
-                "Automatically assign reporters to news items when they appear."
-            );
-            ChaseGoalsEnabled = BindHidden(
-                "ChaseGoals",
-                true,
-                "Prefer story file paths whose skill matches a current weekly goal tag (does not skip stories)."
-            );
-            AvoidRisksEnabled = BindHidden(
-                "AvoidRisks",
-                true,
-                "Skip risky news items (Injury, Lawsuit, etc.) unless they also match a weekly goal."
-            );
-            DiscardIfNoReporterForHours = BindHidden(
-                "DiscardIfNoReporterForHours",
-                DefaultDiscardIfNoReporterHours,
-                "Discard a news item if no reporter with the right skill will be free within this many in-game hours (0 = disabled). Fractional values honoured."
-            );
-            DiscardFreshStoriesOnWeekend = BindHidden(
-                "DiscardFreshStoriesOnWeekend",
-                true,
-                "Discard fresh (unstarted) stories that arrive on Saturday or Sunday - not enough time to finish. Invested stories never discarded here."
-            );
-            MinReportersToActivate = BindHidden(
-                "MinReportersToActivate",
-                DefaultMinReportersToActivate,
-                "Below this many reporters the mod is fully passive (tutorial / early-game safety)."
-            );
-            AutoAssignOnlyObviousPath = BindHidden(
-                "AutoAssignOnlyObviousPath",
-                false,
-                "When true, skip auto-assign unless goal priority yields exactly one winning assignable path. Requires ChaseGoals on; with it off, any multi-slot story waits for manual assignment."
-            );
-        }
-
-        // Popup suppression + direct resolution for the three modal popups
-        // that would otherwise block the auto-assign loop.
-        private void BindPopupAutomationConfig()
-        {
-            AutoSkipRiskPopups = BindHidden(
-                "AutoSkipRiskPopups",
-                true,
-                "Automatically dismiss risk spinner popups. Outcome is identical; the popup is cosmetic."
-            );
-            AutoSkipSuitcasePopups = BindHidden(
-                "AutoSkipSuitcasePopups",
-                true,
-                "Automatically handle new-item suitcase rewards: pre-resolves unlocked suitcase nodes so the chain never stalls waiting for the player to view the story, and auto-skips the popup if it still manages to open. Unlock side-effect is identical to manual play (same DRNG draw)."
-            );
-            AutoResolveBribeMinigame = BindHidden(
-                "AutoResolveBribeMinigame",
-                true,
-                "Automatically pay bribe nodes when affordable. Cost matches manual play (same DRNG call). Left for manual handling if not affordable."
-            );
-        }
-
-        // Ad-side automation. Currently one knob - future ad-specific
-        // settings (skill overrides, deadline respects) go here.
-        private void BindAdAutomationConfig()
+        // All [Dev] keys in alphabetical order by setting name (matches README).
+        private void BindDevSectionConfig()
         {
             AutoAssignAds = BindHidden(
                 "AutoAssignAds",
@@ -182,16 +115,84 @@ namespace NewsTowerAutoAssign
                     + "skill and is free gets the work. Boycotted ads are skipped. The "
                     + "MinReportersToActivate gate does NOT apply to ads."
             );
-        }
-
-        // Globe map pins: tint only (Auto / Manual / Mixed) on the pin Images.
-        private void BindGlobeOwnershipConfig()
-        {
+            AutoAssignOnlyObviousPath = BindHidden(
+                "AutoAssignOnlyObviousPath",
+                false,
+                "Skip auto-assign for multi-path stories for manual assignment. If ChaseGoals "
+                    + "is on, auto-assign only when the goal priority yields exactly one "
+                    + "winning assignable path."
+            );
+            AutoResolveBribes = BindHidden(
+                "AutoResolveBribes",
+                true,
+                "Automatically pay bribes when affordable. Cost matches manual play. "
+                    + "Left for manual handling if not affordable. When false, any story "
+                    + "that has an incomplete bribe is fully manual."
+            );
+            AutoSkipRiskPopups = BindHidden(
+                "AutoSkipRiskPopups",
+                true,
+                "Automatically dismiss risk spinner popups. Outcome is identical; the popup is cosmetic."
+            );
+            AutoSkipSuitcasePopups = BindHidden(
+                "AutoSkipSuitcasePopups",
+                true,
+                "Automatically handle new-item suitcase rewards: pre-resolves unlocked "
+                    + "suitcases so the chain never stalls waiting for the player to view "
+                    + "the story, and auto-skips the popup if it still manages to open. "
+                    + "Unlock side-effect is identical to manual play."
+            );
+            AvoidRisksEnabled = BindHidden(
+                "AvoidRisks",
+                true,
+                "Skip risky news items (Injury, Lawsuit, etc.) unless they also match a "
+                    + "weekly goal. If ChaseGoals is off, risky news items are always skipped."
+            );
+            ChaseGoalsEnabled = BindHidden(
+                "ChaseGoals",
+                true,
+                "Prefer story file paths whose skill matches a current weekly goal tag."
+            );
+            DiscardFreshStoriesOnWeekend = BindHidden(
+                "DiscardFreshStoriesOnWeekend",
+                true,
+                "Discard fresh (unstarted) stories that arrive on Saturday or Sunday. If "
+                    + "ChaseGoals is on, fresh stories that match an uncovered weekly goal "
+                    + "are kept even on weekends."
+            );
+            DiscardIfNoReporterForHours = BindHidden(
+                "DiscardIfNoReporterForHours",
+                DefaultDiscardIfNoReporterHours,
+                "Discard a news item if no reporter with the right skill will be free "
+                    + "within this many in-game hours (0 = disabled). Fractional values "
+                    + "are accepted."
+            );
+            AutoAssignEnabled = BindHidden(
+                "Enabled",
+                true,
+                "Automatically assign reporters to news items when they appear. The mod "
+                    + "does nothing when set to false."
+            );
             GlobePinOwnershipEnabled = BindHidden(
                 "GlobePinOwnershipEnabled",
                 true,
-                "Tint globe pins: green when all stories at the pin are mod-tracked, white when none, amber when mixed."
+                "Globe pins are tinted green when all stories at the pin are mod-tracked, "
+                    + "white when none, amber when mixed."
             );
+            MinReportersToActivate = BindHidden(
+                "MinReportersToActivate",
+                DefaultMinReportersToActivate,
+                "Below this many reporters the mod will not auto-assign news stories. The "
+                    + "default is 3 and cannot be lowered: any value below 3 is clamped "
+                    + "back to 3. Values above 3 are accepted."
+            );
+        }
+
+        private static void ClampMinReportersToActivate()
+        {
+            int v = MinReportersToActivate.Value;
+            if (v < DefaultMinReportersToActivate)
+                MinReportersToActivate.Value = DefaultMinReportersToActivate;
         }
 
         // Developer-only knobs. Conditional-compiled out of Release builds

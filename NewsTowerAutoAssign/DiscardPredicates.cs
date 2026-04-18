@@ -6,19 +6,24 @@ namespace NewsTowerAutoAssign
     internal static class DiscardPredicates
     {
         // True when a risky story should be discarded.
-        // All five conditions must hold: the feature is on, goals are loaded so we can
-        // judge whether the risk is worth it, the story hasn't been started yet (never
-        // discard invested work), it actually has a risk component, and none of its tags
-        // match an active uncovered goal.
+        // Invested work is never discarded. When AvoidRisks is off, nothing is discarded
+        // here. When ChaseGoals is off, any fresh risky story is discarded (no goal
+        // exception). When ChaseGoals is on, we discard only if goals are loaded so we
+        // can judge value, and the story does not match an uncovered goal.
         internal static bool ShouldDiscardForRisk(
-            bool featureEnabled,
+            bool avoidRisksEnabled,
+            bool chaseGoalsEnabled,
             bool isInvested,
             bool goalsLoaded,
             bool hasRisk,
             bool matchesUncoveredGoal
         )
         {
-            return featureEnabled && goalsLoaded && !isInvested && hasRisk && !matchesUncoveredGoal;
+            if (!avoidRisksEnabled || isInvested || !hasRisk)
+                return false;
+            if (!chaseGoalsEnabled)
+                return true;
+            return goalsLoaded && !matchesUncoveredGoal;
         }
 
         // True when a fresh weekend story should be discarded.

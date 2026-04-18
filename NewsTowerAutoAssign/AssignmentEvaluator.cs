@@ -89,6 +89,8 @@ namespace NewsTowerAutoAssign
         {
             if (newsItem?.Data == null)
                 return;
+            if (BribeAutomation.StoryIsPlayerBribeControlled(newsItem))
+                return;
             // Pay any bribe nodes that unlocked since the last scan
             // (e.g. step 2 of a multi-step story that arrived before the weekend).
             BribeAutomation.TryPayBribes(newsItem);
@@ -248,6 +250,8 @@ namespace NewsTowerAutoAssign
         {
             if (IsPassivelyBelowReporterThreshold(newsItem))
                 return;
+            if (BribeAutomation.StoryIsPlayerBribeControlled(newsItem))
+                return;
 
             var ctx = BuildContext(
                 newsItem,
@@ -390,6 +394,7 @@ namespace NewsTowerAutoAssign
             if (
                 !DiscardPredicates.ShouldDiscardForRisk(
                     AutoAssignPlugin.AvoidRisksEnabled.Value,
+                    AutoAssignPlugin.ChaseGoalsEnabled.Value,
                     ctx.AlreadyInvested,
                     ctx.GoalsLoaded,
                     ctx.HasRisk,

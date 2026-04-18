@@ -115,6 +115,7 @@ namespace NewsTowerAutoAssign.InGameTests
                 if (
                     DiscardPredicates.ShouldDiscardForRisk(
                         AutoAssignPlugin.AvoidRisksEnabled.Value,
+                        AutoAssignPlugin.ChaseGoalsEnabled.Value,
                         isInvested,
                         goalsLoaded,
                         hasRisk,
@@ -148,7 +149,9 @@ namespace NewsTowerAutoAssign.InGameTests
 
             // Emit a single Pass line when each enabled check found no violations,
             // so the suite summary shows explicit signal rather than silence.
-            bool riskCheckActive = AutoAssignPlugin.AvoidRisksEnabled.Value && goalsLoaded;
+            bool riskCheckActive =
+                AutoAssignPlugin.AvoidRisksEnabled.Value
+                && (AutoAssignPlugin.ChaseGoalsEnabled.Value ? goalsLoaded : true);
             bool weekendCheckActive =
                 AutoAssignPlugin.DiscardFreshStoriesOnWeekend.Value && isWeekend;
 
@@ -157,7 +160,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     "discarded stories are gone / risk",
                     !AutoAssignPlugin.AvoidRisksEnabled.Value
                         ? "AvoidRisks is off"
-                        : "goal context not loaded yet"
+                        : "goal context not loaded yet (ChaseGoals requires it)"
                 );
             else if (riskViolations == 0)
                 ctx.Pass("discarded stories are gone / risk: no surviving risk-eligible stories");

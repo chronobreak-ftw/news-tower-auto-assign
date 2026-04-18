@@ -169,6 +169,7 @@ namespace NewsTowerAutoAssign.InGameTests
                 if (
                     DiscardPredicates.ShouldDiscardForRisk(
                         AutoAssignPlugin.AvoidRisksEnabled.Value,
+                        AutoAssignPlugin.ChaseGoalsEnabled.Value,
                         isInvested: false,
                         goalsLoaded,
                         hasRisk,

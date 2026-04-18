@@ -81,7 +81,8 @@ namespace NewsTowerAutoAssign.InGameTests
             // All three discard gates must respect the match when matchesUncovered is true.
             ctx.Assert(
                 !DiscardPredicates.ShouldDiscardForRisk(
-                    featureEnabled: true,
+                    avoidRisksEnabled: true,
+                    chaseGoalsEnabled: true,
                     isInvested: false,
                     goalsLoaded: true,
                     hasRisk: true,
@@ -113,7 +114,14 @@ namespace NewsTowerAutoAssign.InGameTests
             // regression guard that proves we key off matchesGoal and not some other
             // signal that happens to be true in the live log.
             ctx.Assert(
-                DiscardPredicates.ShouldDiscardForRisk(true, false, true, true, matchesCovered),
+                DiscardPredicates.ShouldDiscardForRisk(
+                    true,
+                    true,
+                    false,
+                    true,
+                    true,
+                    matchesCovered
+                ),
                 "risky + fresh + binary already covered → discard"
             );
             ctx.Assert(
@@ -143,6 +151,15 @@ namespace NewsTowerAutoAssign.InGameTests
                 ctx.NotApplicable(
                     "live board",
                     "no binary / composed-quest goal tags active in this save right now"
+                );
+                return;
+            }
+
+            if (!AutoAssignPlugin.ChaseGoalsEnabled.Value)
+            {
+                ctx.NotApplicable(
+                    "live board",
+                    "ChaseGoals is off — goal-match preservation checks do not apply"
                 );
                 return;
             }
@@ -179,6 +196,7 @@ namespace NewsTowerAutoAssign.InGameTests
                 ctx.Assert(
                     !DiscardPredicates.ShouldDiscardForRisk(
                         AutoAssignPlugin.AvoidRisksEnabled.Value,
+                        AutoAssignPlugin.ChaseGoalsEnabled.Value,
                         isInvested: false,
                         goalsLoaded: true,
                         hasRisk: newsItem.GetComponentsInChildren<INewsItemRisk>(true).Any(),

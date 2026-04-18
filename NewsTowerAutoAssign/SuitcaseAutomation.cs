@@ -87,6 +87,8 @@ namespace NewsTowerAutoAssign
         {
             if (!AutoAssignPlugin.AutoSkipSuitcasePopups.Value || newsItem == null)
                 return;
+            if (BribeAutomation.StoryIsPlayerBribeControlled(newsItem))
+                return;
             // Defer to the universal safety gate - before save restoration has
             // completed, calling UnlockItem -> TryUnlockFromList -> GetOrCreateList
             // seeds a fresh entry in BuildUnlockListManager.lists that

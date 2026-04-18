@@ -101,6 +101,8 @@ namespace NewsTowerAutoAssign
         private static void HandleAddedNewsItem(NewsItem newsItem)
         {
             LogStoryTags(newsItem);
+            if (BribeAutomation.StoryIsPlayerBribeControlled(newsItem))
+                return;
             BribeAutomation.TryPayBribes(newsItem);
             AssignmentEvaluator.TryAssignNewsItem(newsItem);
         }
@@ -204,6 +206,8 @@ namespace NewsTowerAutoAssign
                     foreach (var newsItem in LiveReportableManager.Instance.GetNewsItems().ToList())
                     {
                         if (newsItem?.Data == null)
+                            continue;
+                        if (BribeAutomation.StoryIsPlayerBribeControlled(newsItem))
                             continue;
                         BribeAutomation.TryPayBribes(newsItem);
                         SuitcaseAutomation.TryResolveSuitcases(newsItem);
