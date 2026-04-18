@@ -8,24 +8,6 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // End-to-end pipeline invariants: checks that the board state after
-    // TryAutoAssignAll completed is internally consistent with the mod's
-    // own decision rules.
-    //
-    // These tests run AFTER TryAutoAssignAll (the idle-rescan patch calls
-    // the scan then immediately calls RunOnceWhenReady), so any story that
-    // should have been discarded is already gone.
-    //
-    // What we test
-    // ------------
-    //  * DiscardedStoriesAreGone: no story still on the board satisfies the
-    //    risk or weekend discard predicates — if one does, the discard path
-    //    regressed and a story the mod should have removed is silently surviving.
-    //
-    //  * ChosenPathIsHighestPriority: for every mod-assigned story with multiple
-    //    paths, no open path has a higher goal priority than the best-assigned
-    //    path when a reporter for that open path is free right now. A reporter
-    //    being busy is a legitimate WAIT state and is excluded from the assertion.
     internal static class PipelineInvariantTests
     {
         internal static void Run()
@@ -36,19 +18,6 @@ namespace NewsTowerAutoAssign.InGameTests
             ctx.PrintSummary();
         }
 
-        // After TryAutoAssignAll has run, no story on the board should satisfy
-        // the risk or weekend discard predicates — if it does, the discard
-        // pipeline has a hole and a story the player probably doesn't want is
-        // silently accumulating on the board.
-        //
-        // Exceptions handled:
-        //   * AutoAssign disabled — mod never ran, skip entirely.
-        //   * Below reporter threshold — mod is passive, no discards fire.
-        //   * AutoAssignOnlyObviousPath + XOR-ambiguous — discards are deferred
-        //     for these stories so the player can make the branching choice first.
-        //   * goalsLoaded=false — risk discard requires goal context; without it
-        //     the predicate is always false, so the risk check is N/A.
-        //   * Not weekend — weekend discard predicate is always false on weekdays.
         private static void DiscardedStoriesAreGone(TestContext ctx)
         {
             if (LiveReportableManager.Instance == null)
@@ -72,7 +41,7 @@ namespace NewsTowerAutoAssign.InGameTests
                         + reporterCount
                         + " < "
                         + AutoAssignPlugin.MinReportersToActivate.Value
-                        + ") — mod is passive"
+                        + ") - mod is passive"
                 );
                 return;
             }
@@ -92,8 +61,6 @@ namespace NewsTowerAutoAssign.InGameTests
 
                 bool isInvested = AssignmentEvaluator.IsAnySlotInProgress(ni);
 
-                // Discard gates are deferred for XOR-ambiguous stories when
-                // AutoAssignOnlyObviousPath is on — skip those here.
                 if (AutoAssignPlugin.AutoAssignOnlyObviousPath.Value)
                 {
                     var slots = new List<NewsItemStoryFile>();
@@ -115,6 +82,7 @@ namespace NewsTowerAutoAssign.InGameTests
                 if (
                     DiscardPredicates.ShouldDiscardForRisk(
                         AutoAssignPlugin.AvoidRisksEnabled.Value,
+                        AutoAssignPlugin.ChaseGoalsEnabled.Value,
                         isInvested,
                         goalsLoaded,
                         hasRisk,
@@ -125,7 +93,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     riskViolations++;
                     ctx.Fail(
                         "discarded stories are gone / risk: " + ShortName(ni),
-                        "non-invested, risky, no goal match — should have been discarded"
+                        "non-invested, risky, no goal match - should have been discarded"
                     );
                 }
 
@@ -141,14 +109,14 @@ namespace NewsTowerAutoAssign.InGameTests
                     weekendViolations++;
                     ctx.Fail(
                         "discarded stories are gone / weekend: " + ShortName(ni),
-                        "fresh, weekend, no goal match — should have been discarded"
+                        "fresh, weekend, no goal match - should have been discarded"
                     );
                 }
             }
 
-            // Emit a single Pass line when each enabled check found no violations,
-            // so the suite summary shows explicit signal rather than silence.
-            bool riskCheckActive = AutoAssignPlugin.AvoidRisksEnabled.Value && goalsLoaded;
+            bool riskCheckActive =
+                AutoAssignPlugin.AvoidRisksEnabled.Value
+                && (AutoAssignPlugin.ChaseGoalsEnabled.Value ? goalsLoaded : true);
             bool weekendCheckActive =
                 AutoAssignPlugin.DiscardFreshStoriesOnWeekend.Value && isWeekend;
 
@@ -157,7 +125,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     "discarded stories are gone / risk",
                     !AutoAssignPlugin.AvoidRisksEnabled.Value
                         ? "AvoidRisks is off"
-                        : "goal context not loaded yet"
+                        : "goal context not loaded yet (ChaseGoals requires it)"
                 );
             else if (riskViolations == 0)
                 ctx.Pass("discarded stories are gone / risk: no surviving risk-eligible stories");
@@ -175,22 +143,13 @@ namespace NewsTowerAutoAssign.InGameTests
                 );
         }
 
-        // When ChaseGoals is on, the evaluator orders paths by goal priority and
-        // assigns in that order. After TryAutoAssignAll, for every mod-assigned
-        // story that has both assigned and open paths, no open path should have a
-        // strictly higher priority than the best-assigned path — unless no reporter
-        // for that open path is currently free (legitimate WAIT-no-reporter state).
-        //
-        // A violation here means the path-ordering regressed: a lower-priority
-        // path got a reporter while a higher-priority path sat unassigned with a
-        // free reporter available right now.
         private static void ChosenPathIsHighestPriority(TestContext ctx)
         {
             if (!AutoAssignPlugin.ChaseGoalsEnabled.Value)
             {
                 ctx.NotApplicable(
                     "chosen path is highest priority",
-                    "ChaseGoals is off — path ordering is not applied"
+                    "ChaseGoals is off - path ordering is not applied"
                 );
                 return;
             }
@@ -217,13 +176,12 @@ namespace NewsTowerAutoAssign.InGameTests
                     .Where(sf => sf != null)
                     .ToList();
                 if (allFiles.Count <= 1)
-                    continue; // nothing to compare on single-path stories
+                    continue;
 
                 var assignedFiles = allFiles.Where(sf => sf.Assignee != null).ToList();
                 if (assignedFiles.Count == 0)
                     continue;
 
-                // Open paths: no assignee, not completed, not locked/destroyed.
                 var openFiles = allFiles
                     .Where(sf =>
                         sf.Assignee == null
@@ -234,7 +192,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     )
                     .ToList();
                 if (openFiles.Count == 0)
-                    continue; // all paths are accounted for
+                    continue;
 
                 checkedStories++;
 
@@ -268,10 +226,6 @@ namespace NewsTowerAutoAssign.InGameTests
                     if (openPriority <= bestAssigned)
                         continue;
 
-                    // Higher-priority path is open. If no reporter is free right
-                    // now, this is a legitimate WAIT-no-reporter state — skip.
-                    // If a reporter IS available, TryAutoAssignAll should have
-                    // assigned this path and didn't, which is the bug.
                     var available = ReporterLookup.PickBestAvailable(openSf.AssignSkill);
                     if (available == null)
                         continue;

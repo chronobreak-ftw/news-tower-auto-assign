@@ -1,7 +1,5 @@
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Tests for DiscardPredicates - the three pure boolean discard decisions.
-    // These run without any live game state and should always pass.
     internal static class DiscardPredicateTests
     {
         internal static void Run()
@@ -16,28 +14,36 @@ namespace NewsTowerAutoAssign.InGameTests
         private static void RiskTests(TestContext ctx)
         {
             ctx.Assert(
-                !DiscardPredicates.ShouldDiscardForRisk(false, false, true, true, false),
+                !DiscardPredicates.ShouldDiscardForRisk(false, true, false, true, true, false),
                 "feature-off → keep"
             );
             ctx.Assert(
-                !DiscardPredicates.ShouldDiscardForRisk(true, true, true, true, false),
+                !DiscardPredicates.ShouldDiscardForRisk(true, true, true, true, true, false),
                 "invested → keep regardless"
             );
             ctx.Assert(
-                !DiscardPredicates.ShouldDiscardForRisk(true, false, false, true, false),
-                "goals not loaded → keep (can't judge)"
+                !DiscardPredicates.ShouldDiscardForRisk(true, true, false, false, true, false),
+                "chase on + goals not loaded → keep (can't judge)"
             );
             ctx.Assert(
-                !DiscardPredicates.ShouldDiscardForRisk(true, false, true, false, false),
+                DiscardPredicates.ShouldDiscardForRisk(true, false, false, false, true, false),
+                "chase off + fresh risky → discard (no goal exception)"
+            );
+            ctx.Assert(
+                !DiscardPredicates.ShouldDiscardForRisk(true, false, true, true, true, false),
+                "chase off but invested → keep"
+            );
+            ctx.Assert(
+                !DiscardPredicates.ShouldDiscardForRisk(true, true, false, true, false, false),
                 "no risk component → keep"
             );
             ctx.Assert(
-                !DiscardPredicates.ShouldDiscardForRisk(true, false, true, true, true),
+                !DiscardPredicates.ShouldDiscardForRisk(true, true, false, true, true, true),
                 "matches uncovered goal → keep"
             );
             ctx.Assert(
-                DiscardPredicates.ShouldDiscardForRisk(true, false, true, true, false),
-                "risky + no goal + not invested → discard"
+                DiscardPredicates.ShouldDiscardForRisk(true, true, false, true, true, false),
+                "chase on + risky + no goal + not invested → discard"
             );
         }
 

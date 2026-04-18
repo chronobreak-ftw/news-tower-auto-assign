@@ -2,10 +2,6 @@ using BepInEx.Logging;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Colour-coding (per suite and per run) is uniform across the test layer:
-    //   [OK]   white / bright (LogLevel.Message) - all passed, no skips
-    //   [WARN] yellow          (LogLevel.Warning) - skips but no failures
-    //   [FAIL] red             (LogLevel.Error)   - any failures
     internal class TestContext
     {
         private readonly string _suite;
@@ -35,10 +31,6 @@ namespace NewsTowerAutoAssign.InGameTests
             Log.LogInfo("[PASS] " + _suite + " / " + name);
         }
 
-        // LogError so failed assertions render red in the BepInEx console and
-        // stand out when scanning LogOutput.log by level. Previously this used
-        // LogWarning, which made real failures indistinguishable from the
-        // yellow "some skips" signal at the summary line.
         internal void Fail(string name, string reason = "")
         {
             _failed++;
@@ -63,12 +55,6 @@ namespace NewsTowerAutoAssign.InGameTests
             );
         }
 
-        // "Not Applicable": the test has a precondition that depends on the
-        // current SAVE rather than the test run's timing (e.g. no HiddenAgenda
-        // hubs exist in this save). There is nothing to defer - the scenario
-        // just isn't present - so we log at INFO and do NOT count it against
-        // the summary. This keeps the master [RUN] line at [OK] when every
-        // runnable assertion passes.
         internal void NotApplicable(string name, string reason = "")
         {
             Log.LogInfo(
@@ -84,8 +70,6 @@ namespace NewsTowerAutoAssign.InGameTests
 
         internal void PrintSummary()
         {
-            // Feed the run-level aggregator before emitting the per-suite line
-            // so InGameTestRunner sees every suite regardless of call order.
             TestRunAggregator.Accumulate(_passed, _failed, _skipped);
 
             string badge;

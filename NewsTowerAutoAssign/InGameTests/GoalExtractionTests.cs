@@ -10,37 +10,12 @@ using UnityEngine;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Tests the goal-tag extraction pipeline end-to-end against live game
-    // state.
-    //
-    // The regression that motivated this rewrite: faction (mafia / mayor /
-    // police) ComposedQuests carry their "Print at least one Red Herring"
-    // goal as QuestCollectingCombo / QuestCollectingReward components (not
-    // QuestTargetSetRequirement). The previous extractor and its tests
-    // both only looked at QuestTargetSet/Combo/TopTag/AboveTheFold - so the
-    // tag went unseen and the tests silently passed.
-    //
-    // Guard principles applied here:
-    //
-    //  * Assertions are driven by the DATA tree (the authored
-    //    ScriptableObject hierarchy), NOT by the runtime fetch the
-    //    extractor uses. If extraction has a blind spot, data-tree truth
-    //    still surfaces the missed tag and the test fails.
-    //
-    //  * No pre-filtering by "reqs.OfType<X>().Any()" - that's the same
-    //    broken signal the extractor uses. Every non-dummy quest with any
-    //    authored tag-bearing component must round-trip through extraction.
-    //
-    //  * On failure, DumpComposedQuestStructure prints the full tree so
-    //    the next coverage gap is obvious.
     internal static class GoalExtractionTests
     {
         internal static void Run()
         {
             var ctx = new TestContext("GoalExtraction");
 
-            // Runner gates on QuestManager + non-dummy ComposedQuest existing,
-            // so reaching this point with either null is a runner bug.
             if (QuestManager.Instance == null)
             {
                 ctx.Skip("all", "QuestManager not available - runner should have deferred");
@@ -57,11 +32,6 @@ namespace NewsTowerAutoAssign.InGameTests
             ctx.PrintSummary();
         }
 
-        // Every active ComposedQuest must be reachable from at least one of
-        // the sources ReporterLookup scans: QuestManager.AllRunningQuests or
-        // AreaMapQuestHub.Quest. Faction quests only appear post-recap so a
-        // zero-count here on a new save is legitimate - we log rather than
-        // fail when there's nothing yet.
         private static void EnumerationSourceTest(TestContext ctx)
         {
             var viaManager = new HashSet<Quest>(
@@ -92,23 +62,11 @@ namespace NewsTowerAutoAssign.InGameTests
             );
         }
 
-        // THE regression guard. For every non-dummy ComposedQuest, compute
-        // the set of tags the DATA tree says should be goal tags, then run
-        // the extractor and assert every data-tree tag appears in binary.
-        //
-        // The data tree is the authored source - every tag listed here is
-        // something the player will see or be judged on. If extraction is
-        // missing anything, this fails loudly with a structural dump so
-        // the gap is obvious.
         private static void ExtractedTagsCoverDataTreeTest(TestContext ctx)
         {
             var allComposed = EnumerateAllComposedQuests().ToList();
             if (allComposed.Count == 0)
             {
-                // Runner waits for at least one non-dummy ComposedQuest; zero
-                // here means enumeration skipped every quest (all dummies /
-                // filtered out). Not a save-state issue - something changed
-                // under us between readiness check and extractor run.
                 ctx.Skip("extracted covers data", "no ComposedQuests enumerable - runner bug");
                 return;
             }
@@ -121,7 +79,7 @@ namespace NewsTowerAutoAssign.InGameTests
 
                 var expected = CollectTagsFromDataTree(cq);
                 if (expected.Count == 0)
-                    continue; // quest has no tag-bearing requirements at all
+                    continue;
 
                 tested++;
                 var quantity = new HashSet<PlayerStatDataTag>();
@@ -158,10 +116,6 @@ namespace NewsTowerAutoAssign.InGameTests
                 );
         }
 
-        // Specifically verifies the faction / HiddenAgenda row is scanned.
-        // If any HiddenAgenda hub is holding a non-dummy ComposedQuest,
-        // that quest must be enumerable via the same two sources
-        // ReporterLookup walks.
         private static void FactionQuestsAreScannedTest(TestContext ctx)
         {
             var root = AreaMapRoot.Instance;
@@ -207,15 +161,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // Every non-dummy ComposedQuest must have a non-empty runtime tree
-        // (at least one ComposableRuntimeComponent child). A non-dummy
-        // quest with an empty runtime tree is a ComposableRuntimeComponent
-        // construction failure - the game itself wouldn't be able to
-        // evaluate or display it.
-        //
-        // This test is a structural sanity check; it's separate from the
-        // extractor test because it catches runtime-build issues without
-        // being confused by tag coverage gaps.
         private static void NonDummyQuestHasRuntimeChildrenTest(TestContext ctx)
         {
             int tested = 0;
@@ -247,9 +192,6 @@ namespace NewsTowerAutoAssign.InGameTests
                 );
         }
 
-        // Public-API sanity: GetCurrentGoalTagSets returns non-null sets
-        // and, when the data tree says binary tags should exist, binary
-        // must be non-empty.
         private static void GetCurrentGoalTagSetsSanityTest(TestContext ctx)
         {
             var (quantity, scoop, binary) = ReporterLookup.GetCurrentGoalTagSets();
@@ -266,9 +208,6 @@ namespace NewsTowerAutoAssign.InGameTests
                     + binary.Count
             );
 
-            // Authoritative: union of all data-tree tags across every
-            // active non-dummy ComposedQuest. If any quest has authored
-            // tag-bearing components, binary must be populated.
             var expectedFromData = new HashSet<PlayerStatDataTag>();
             foreach (var cq in EnumerateAllComposedQuests())
             {
@@ -299,11 +238,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // The authoritative "what tags should this quest care about?" read
-        // from the ScriptableObject data tree. This deliberately covers
-        // every tag-bearing *Data component type we know about so that new
-        // extractor blind spots surface as test failures (data-tree says
-        // there should be a tag, runtime extractor missed it).
         private static HashSet<PlayerStatDataTag> CollectTagsFromDataTree(ComposedQuest cq)
         {
             var tags = new HashSet<PlayerStatDataTag>();

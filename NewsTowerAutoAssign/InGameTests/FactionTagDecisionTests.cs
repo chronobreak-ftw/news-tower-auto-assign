@@ -8,22 +8,6 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // End-to-end decision tests for binary ("faction" / composed-quest) goal tags
-    // like Red Herring. These are the tags the log prints under
-    //   "binary: [Red Herring (Tower_Stats.PlayerStatDataTag)]"
-    // and they need to survive every discard gate, not just the scoring step.
-    //
-    // Two layers:
-    //
-    //   1. Pure scenarios walk a synthetic story through each predicate to prove
-    //      a binary-only tag is enough to beat risk, weekend and availability
-    //      gates simultaneously. If any gate regresses to ignore matchesGoal,
-    //      one of these asserts flips.
-    //
-    //   2. Live scenarios scan the current board and, for every fresh story
-    //      whose actual PlayerStatDataTags include an uncovered binary goal,
-    //      assert none of the three predicates would remove it right now. This
-    //      is the "real Red Herring was on the board and we kept it" check.
     internal static class FactionTagDecisionTests
     {
         internal static void Run()
@@ -34,8 +18,6 @@ namespace NewsTowerAutoAssign.InGameTests
             ctx.PrintSummary();
         }
 
-        // Exercises AssignmentRules + DiscardPredicates with a story whose only
-        // goal match is a binary tag - the shape of a real Red Herring injection.
         private static void PureScenarios(TestContext ctx)
         {
             var storyTags = new[] { "RedHerring" };
@@ -63,7 +45,6 @@ namespace NewsTowerAutoAssign.InGameTests
                 "binary tag already in progress → no longer a match (prevents doubling up)"
             );
 
-            // Binary-only path should score UncoveredBinary (not Quantity, not UncoveredScoop).
             var priority = AssignmentRules.GetPathGoalPriority(
                 storyTags,
                 quantity,
@@ -78,10 +59,10 @@ namespace NewsTowerAutoAssign.InGameTests
                 "got " + priority
             );
 
-            // All three discard gates must respect the match when matchesUncovered is true.
             ctx.Assert(
                 !DiscardPredicates.ShouldDiscardForRisk(
-                    featureEnabled: true,
+                    avoidRisksEnabled: true,
+                    chaseGoalsEnabled: true,
                     isInvested: false,
                     goalsLoaded: true,
                     hasRisk: true,
@@ -108,12 +89,15 @@ namespace NewsTowerAutoAssign.InGameTests
                 "no reporter soon + fresh + binary-only goal match → kept"
             );
 
-            // Same trio, once the binary tag is already covered by another in-progress
-            // story: match flips to false and the gates fire as normal. This is the
-            // regression guard that proves we key off matchesGoal and not some other
-            // signal that happens to be true in the live log.
             ctx.Assert(
-                DiscardPredicates.ShouldDiscardForRisk(true, false, true, true, matchesCovered),
+                DiscardPredicates.ShouldDiscardForRisk(
+                    true,
+                    true,
+                    false,
+                    true,
+                    true,
+                    matchesCovered
+                ),
                 "risky + fresh + binary already covered → discard"
             );
             ctx.Assert(
@@ -126,9 +110,6 @@ namespace NewsTowerAutoAssign.InGameTests
             );
         }
 
-        // Walks the live board and checks that any fresh story currently matching
-        // an uncovered binary goal is safe from all three predicates. Skips if the
-        // game isn't loaded or if no such story is on the board right now.
         private static void LiveBoardScenarios(TestContext ctx)
         {
             if (LiveReportableManager.Instance == null)
@@ -147,6 +128,15 @@ namespace NewsTowerAutoAssign.InGameTests
                 return;
             }
 
+            if (!AutoAssignPlugin.ChaseGoalsEnabled.Value)
+            {
+                ctx.NotApplicable(
+                    "live board",
+                    "ChaseGoals is off - goal-match preservation checks do not apply"
+                );
+                return;
+            }
+
             var inProgress = ReporterLookup.GetInProgressTags();
             bool isWeekend = TowerTimes.IsWeekend(TowerTime.CurrentTime);
 
@@ -160,7 +150,7 @@ namespace NewsTowerAutoAssign.InGameTests
                     .GetComponentsInChildren<NewsItemStoryFile>(true)
                     .Any(sf => sf.IsCompleted || sf.Assignee != null);
                 if (isInvested)
-                    continue; // handled by LiveStateInvariants
+                    continue;
 
                 var storyBinaryHits = newsItem
                     .Data.DistinctStatTypes.OfType<PlayerStatDataTag>()
@@ -173,12 +163,12 @@ namespace NewsTowerAutoAssign.InGameTests
                 checkedCount++;
                 string label = ShortName(newsItem) + " [" + string.Join(",", storyBinaryHits) + "]";
 
-                // The story matches a binary goal by construction, so matchesGoal=true.
                 const bool matchesGoal = true;
 
                 ctx.Assert(
                     !DiscardPredicates.ShouldDiscardForRisk(
                         AutoAssignPlugin.AvoidRisksEnabled.Value,
+                        AutoAssignPlugin.ChaseGoalsEnabled.Value,
                         isInvested: false,
                         goalsLoaded: true,
                         hasRisk: newsItem.GetComponentsInChildren<INewsItemRisk>(true).Any(),

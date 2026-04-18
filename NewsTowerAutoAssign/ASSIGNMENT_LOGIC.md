@@ -11,7 +11,7 @@
 
 ### A story is thrown away (discarded) if:
 
-- It's risky and doesn't match any current weekly goal you still care about, or
+- It's risky, you haven't started it, and either weekly goal chase is off (everything risky is skipped) or it doesn't match any current weekly goal you still care about, or
 - It needs a skill or building you don't/can't have, or
 - It just showed up on Saturday or Sunday, you haven't started it, and it doesn't match an open goal, or
 - Everyone who could do it is busy for longer than your "discard if nobody's free" threshold (default: 4h), the story doesn't match a goal, and you haven't invested yet.
@@ -30,6 +30,6 @@
 
 ### Ads
 
-Toggle: `AutoAssignAds` in `newstower.autoassign.cfg` (`[Dev]`). When on, open slots on the Ads board are filled with the best available staff who are eligible: correct skill, building unlocked, not busy, and the ad isn't under a boycott. If nobody is free, the ad stays for the next scan - there is no "discard" logic for ads.
+When on, open slots on the Ads board are filled with the best available staff who are eligible: correct skill, building unlocked, not busy, and the ad isn't under a boycott. If nobody is free, the ad stays for the next scan - there is no "discard" logic for ads.
 
 ---

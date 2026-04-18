@@ -4,13 +4,6 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign
 {
-    // Emits a single [GOALS] Info line when the in-game period changes (new week /
-    // month per TowerTime) or when quest-derived tag sets change - DEBUG-only.
-    //
-    // Every log route in this class goes through AssignmentLog.Info, which is
-    // [Conditional("DEBUG")], so Release builds emit nothing and pay no string-
-    // concatenation cost. That matches the mod's release-build logging policy:
-    // only errors and warnings survive in the player's BepInEx log.
     internal static class GoalChaseSnapshotLog
     {
         private static int _lastPeriodLogged = int.MinValue;
