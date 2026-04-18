@@ -10,11 +10,6 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Invariant checks against live game state.
-    // These assert that the current board cannot contain stories that violate the
-    // mod's core guarantees: invested stories are never discarded, goal-matching
-    // stories are never discarded for availability, and no bribe is stuck.
-    // Requires a game to be loaded - skips gracefully otherwise.
     internal static class LiveStateInvariantTests
     {
         internal static void Run()
@@ -36,8 +31,6 @@ namespace NewsTowerAutoAssign.InGameTests
             ctx.PrintSummary();
         }
 
-        // For every invested story on the board, verify none of the three discard
-        // predicates would currently flag it for removal.
         private static void InvestedStoryGuards(TestContext ctx)
         {
             var (quantity, _, binary) = ReporterLookup.GetCurrentGoalTagSets();
@@ -90,8 +83,6 @@ namespace NewsTowerAutoAssign.InGameTests
                     "invested not weekend-discarded: " + name
                 );
 
-                // For availability: anyReporterSoon=true because the story is already running -
-                // this always keeps, confirming the predicate honours the invested flag.
                 ctx.Assert(
                     !DiscardPredicates.ShouldDiscardForAvailability(
                         isInvested,
@@ -104,9 +95,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // Verify no bribe component is stuck: IsChosen=true but IsCompleted=false and
-        // IsDestroyed=false means a click was attempted but the popup never completed,
-        // permanently blocking the node.
         private static void BribeStateChecks(TestContext ctx)
         {
             foreach (var newsItem in LiveReportableManager.Instance.GetNewsItems())
@@ -131,17 +119,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // After TryAssignAds has run, every unboycotted ad slot must either have
-        // an assignee or have no employee currently free for it. An unassigned slot
-        // with a free employee means the ad automation path has a hole — it should
-        // have assigned someone on this tick but didn't.
-        //
-        // Slots are skipped when:
-        //   * AutoAssignAds is off — feature disabled, no automation ran.
-        //   * The required building isn't built — SkillIsAvailableForAd already
-        //     filtered it out (WAIT: building missing).
-        //   * Nobody on the roster has the required skill — ditto (WAIT: no skill).
-        //   * All capable employees are currently busy — legitimate WAIT state.
         private static void UnassignedAdsHaveNoFreeEmployee(TestContext ctx)
         {
             if (LiveReportableManager.Instance == null)
@@ -171,21 +148,19 @@ namespace NewsTowerAutoAssign.InGameTests
                     if (sf == null || sf.IsCompleted || GameReflection.IsSlotAlreadyRunning(sf))
                         continue;
                     if (sf.Assignee != null)
-                        continue; // already assigned, all good
+                        continue;
 
                     var skill = sf.AssignSkill;
 
-                    // Skip slots the automation would itself skip.
                     if (skill != null && !AssetUnlocker.IsUnlockedSafe(skill))
-                        continue; // building not built
+                        continue;
                     if (!ReporterLookup.AnyEmployeeEverHasSkill(skill))
-                        continue; // nobody trained for this
+                        continue;
 
                     var available = ReporterLookup.PickBestAvailable(skill);
                     if (available == null)
-                        continue; // everyone busy — legitimate WAIT
+                        continue;
 
-                    // Unassigned slot + free employee = automation failure.
                     checkedSlots++;
                     violatingSlots++;
                     ctx.Fail(
@@ -215,11 +190,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // Verifies GetInProgressTags() returns every tag carried by every story
-        // that has any production progress (completed or assigned slot). If a
-        // tag is missing, the binary-goal dedup logic can over-assign: a second
-        // reporter is sent to chase a goal already covered by an in-progress story
-        // because the coverage check didn't see the tag.
         private static void InProgressTagsAreConsistent(TestContext ctx)
         {
             if (LiveReportableManager.Instance == null)
@@ -254,7 +224,7 @@ namespace NewsTowerAutoAssign.InGameTests
                                 + ShortName(newsItem)
                                 + " / "
                                 + tag.name,
-                            "GetInProgressTags() missed this tag — binary goal dedup will over-assign"
+                            "GetInProgressTags() missed this tag - binary goal dedup will over-assign"
                         );
                     }
                 }
@@ -276,12 +246,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // After TryAutoAssignAll, no non-invested story on the board should have
-        // a dead-end node (a node where every path is unworkable: building not
-        // built or no reporter has the skill). Dead-end stories should have been
-        // discarded by the pipeline. A violation means the discard path for
-        // permanently unworkable stories regressed and they are silently
-        // accumulating on the board.
         private static void DeadEndStoriesNotOnBoard(TestContext ctx)
         {
             if (LiveReportableManager.Instance == null)
@@ -305,7 +269,7 @@ namespace NewsTowerAutoAssign.InGameTests
                         + reporterCount
                         + " < "
                         + AutoAssignPlugin.MinReportersToActivate.Value
-                        + ") — mod is passive"
+                        + ") - mod is passive"
                 );
                 return;
             }
@@ -317,7 +281,7 @@ namespace NewsTowerAutoAssign.InGameTests
                 if (ni?.Data == null)
                     continue;
                 if (AssignmentEvaluator.IsAnySlotInProgress(ni))
-                    continue; // invested stories are never discarded regardless of dead-ends
+                    continue;
 
                 var allFiles = ni.GetComponentsInChildren<NewsItemStoryFile>(true)
                     .Where(sf => sf != null)

@@ -5,8 +5,6 @@ using Reportables;
 
 namespace NewsTowerAutoAssign
 {
-    // Tracks NewsItem instances the mod successfully assigned via AssignTo.
-    // Identity matches AssignmentLog / suppression keys (RuntimeHelpers.GetHashCode).
     internal static class AutoAssignOwnershipRegistry
     {
         private static readonly HashSet<int> AutoAssignedIds = new HashSet<int>();

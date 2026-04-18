@@ -30,6 +30,6 @@
 
 ### Ads
 
-Toggle: `AutoAssignAds` in `newstower.autoassign.cfg` (`[Dev]`). When on, open slots on the Ads board are filled with the best available staff who are eligible: correct skill, building unlocked, not busy, and the ad isn't under a boycott. If nobody is free, the ad stays for the next scan - there is no "discard" logic for ads.
+When on, open slots on the Ads board are filled with the best available staff who are eligible: correct skill, building unlocked, not busy, and the ad isn't under a boycott. If nobody is free, the ad stays for the next scan - there is no "discard" logic for ads.
 
 ---

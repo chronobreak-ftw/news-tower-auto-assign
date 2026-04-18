@@ -127,18 +127,11 @@ namespace NewsTowerAutoAssign
                 TintStatusImages(statusLabel, OwnershipMode.Manual);
         }
 
-        // Test helpers — allow in-game tests to verify the rendered pin state
-        // independently from the patch logic without duplicating the pin-image
-        // resolution or color computation.
-
         internal static bool InnerImageFieldResolvable => StatusInnerImagesField != null;
 
         internal static Image[] GetPinImagesForLabel(LocationStatusLabel statusLabel) =>
             ResolvePinImages(statusLabel);
 
-        // Returns the Color that TintStatusImages would apply to a display in
-        // its current registry state. Tests can compare this against the
-        // Image.color values that the last Refresh() actually wrote.
         internal static Color GetExpectedTintForDisplay(LocationDisplay display)
         {
             if (display == null)

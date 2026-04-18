@@ -2,12 +2,6 @@ using GameState;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Regression tests for two specific fixes:
-    //   1. AutoAssignEnabled must fully gate TryAssignNewsItem (HIGH review finding).
-    //   2. DiscardIfNoReporterForHours must honour fractional hours - the old
-    //      (int)hours cast silently rounded 0.5h → 0 and 3.5h → 3h (MEDIUM).
-    // Both live in the decision path, so we validate the knobs via observable
-    // state rather than by double-patching the methods.
     internal static class KillSwitchTests
     {
         internal static void Run()
@@ -15,14 +9,11 @@ namespace NewsTowerAutoAssign.InGameTests
             var ctx = new TestContext("KillSwitch");
             AutoAssignEnabledToggleObservable(ctx);
             FractionalHoursDeadlinePreserved(ctx);
+            MinReporterClampEnforced(ctx);
+            BribeKillSwitchConfigRoundTrips(ctx);
             ctx.PrintSummary();
         }
 
-        // Simply assert the flag is readable and wired through to the evaluator -
-        // we cannot feasibly trigger AddReportable from a test, but we can verify
-        // the contract that TryAutoAssignAll respects the flag (it is observably
-        // a no-op when the flag is false: it does not throw, log errors, or remove
-        // reportables). Running with the flag toggled off is side-effect free.
         private static void AutoAssignEnabledToggleObservable(TestContext ctx)
         {
             bool original = AutoAssignPlugin.AutoAssignEnabled.Value;
@@ -44,14 +35,52 @@ namespace NewsTowerAutoAssign.InGameTests
             }
         }
 
-        // Build two TowerTimeDurations and confirm the one built from the new
-        // minute-preserving path is strictly longer than the int-truncated one
-        // for a fractional input. This would have been equal under the bug.
+        private static void MinReporterClampEnforced(TestContext ctx)
+        {
+            int original = AutoAssignPlugin.MinReportersToActivate.Value;
+            try
+            {
+                AutoAssignPlugin.MinReportersToActivate.Value = 1;
+                ctx.Assert(
+                    AutoAssignPlugin.MinReportersToActivate.Value >= 3,
+                    "MinReportersToActivate clamped to minimum of 3 when set to 1",
+                    "actual=" + AutoAssignPlugin.MinReportersToActivate.Value
+                );
+            }
+            finally
+            {
+                AutoAssignPlugin.MinReportersToActivate.Value = original;
+            }
+        }
+
+        private static void BribeKillSwitchConfigRoundTrips(TestContext ctx)
+        {
+            bool original = AutoAssignPlugin.AutoResolveBribes.Value;
+            try
+            {
+                AutoAssignPlugin.AutoResolveBribes.Value = false;
+                ctx.Assert(
+                    !AutoAssignPlugin.AutoResolveBribes.Value,
+                    "AutoResolveBribes=false round-trips through BepInEx config"
+                );
+                AutoAssignPlugin.AutoResolveBribes.Value = true;
+                ctx.Assert(
+                    AutoAssignPlugin.AutoResolveBribes.Value,
+                    "AutoResolveBribes=true round-trips through BepInEx config"
+                );
+                ctx.Pass("AutoResolveBribes kill-switch config round-trips");
+            }
+            finally
+            {
+                AutoAssignPlugin.AutoResolveBribes.Value = original;
+            }
+        }
+
         private static void FractionalHoursDeadlinePreserved(TestContext ctx)
         {
             const float fractional = 3.5f;
-            int truncated = (int)fractional; // 3h - what the old code used
-            int preserved = (int)System.Math.Round(fractional * 60f); // 210min - new behaviour
+            int truncated = (int)fractional;
+            int preserved = (int)System.Math.Round(fractional * 60f);
 
             long truncatedMinutes = TowerTimeDuration.FromHours(truncated).TotalMinutes;
             long preservedMinutes = TowerTimeDuration.FromMinutes(preserved).TotalMinutes;
@@ -62,7 +91,6 @@ namespace NewsTowerAutoAssign.InGameTests
                 "preserved=" + preservedMinutes + "m truncated=" + truncatedMinutes + "m"
             );
 
-            // Also cover the 0 < hours < 1 case the old bug reduced to zero.
             long halfHourMinutes = TowerTimeDuration
                 .FromMinutes((int)System.Math.Round(0.5f * 60f))
                 .TotalMinutes;

@@ -7,8 +7,6 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Tests for AssignmentRules - the game-typed helpers.
-    // These run against live game state and skip gracefully when the game isn't ready.
     internal static class AssignmentRuleTests
     {
         internal static void Run()
@@ -21,18 +19,6 @@ namespace NewsTowerAutoAssign.InGameTests
             ctx.PrintSummary();
         }
 
-        // Pure tests — no live game state required.
-        //
-        // Two things verified:
-        //   1. Enum ordering: PathPriority is int-backed and the evaluator uses
-        //      > / < to compare scores, so the declared numeric values must match
-        //      the documented hierarchy. A typo in the enum values (e.g. Quantity=3
-        //      and UncoveredBinary=1) would silently invert path selection.
-        //
-        //   2. Scoring: each reachable priority tier must be reachable with the
-        //      right input combination and only that combination. Uses the generic
-        //      string overload so no game DLL types are needed — these assertions
-        //      survive game updates that rename PlayerStatDataTag instances.
         private static void PriorityOrderingTests(TestContext ctx)
         {
             ctx.Assert(
@@ -47,12 +33,8 @@ namespace NewsTowerAutoAssign.InGameTests
                 PathPriority.Quantity > PathPriority.CoveredBinary,
                 "Quantity > CoveredBinary"
             );
-            ctx.Assert(
-                PathPriority.CoveredBinary > PathPriority.None,
-                "CoveredBinary > None"
-            );
+            ctx.Assert(PathPriority.CoveredBinary > PathPriority.None, "CoveredBinary > None");
 
-            // Synthetic goal sets — string-typed so the test is pure.
             var qty = new HashSet<string> { "Economy" };
             var scoop = new HashSet<string> { "Crime" };
             var bin = new HashSet<string> { "Society", "Crime" };
@@ -61,52 +43,90 @@ namespace NewsTowerAutoAssign.InGameTests
 
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Sports" }, qty, scoop, bin, empty, _ => false
+                    new[] { "Sports" },
+                    qty,
+                    scoop,
+                    bin,
+                    empty,
+                    _ => false
                 ) == PathPriority.None,
                 "unrelated tag → None"
             );
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Economy" }, qty, scoop, bin, empty, _ => false
+                    new[] { "Economy" },
+                    qty,
+                    scoop,
+                    bin,
+                    empty,
+                    _ => false
                 ) == PathPriority.Quantity,
                 "quantity tag → Quantity"
             );
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Society" }, qty, scoop, bin, covered, _ => false
+                    new[] { "Society" },
+                    qty,
+                    scoop,
+                    bin,
+                    covered,
+                    _ => false
                 ) == PathPriority.CoveredBinary,
                 "binary tag already in-progress → CoveredBinary"
             );
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Crime" }, qty, scoop, bin, empty, _ => false
+                    new[] { "Crime" },
+                    qty,
+                    scoop,
+                    bin,
+                    empty,
+                    _ => false
                 ) == PathPriority.UncoveredBinary,
                 "uncovered binary tag on non-scoop path → UncoveredBinary"
             );
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Crime" }, qty, scoop, bin, empty, t => t == "Crime"
+                    new[] { "Crime" },
+                    qty,
+                    scoop,
+                    bin,
+                    empty,
+                    t => t == "Crime"
                 ) == PathPriority.UncoveredScoop,
                 "uncovered scoop tag on scoop-qualified path → UncoveredScoop"
             );
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Sports", "Economy" }, qty, scoop, bin, empty, _ => false
+                    new[] { "Sports", "Economy" },
+                    qty,
+                    scoop,
+                    bin,
+                    empty,
+                    _ => false
                 ) == PathPriority.Quantity,
                 "multi-tag path: best priority wins (Sports+Economy → Quantity)"
             );
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Society", "Economy" }, qty, scoop, bin, covered, _ => false
+                    new[] { "Society", "Economy" },
+                    qty,
+                    scoop,
+                    bin,
+                    covered,
+                    _ => false
                 ) == PathPriority.Quantity,
                 "Quantity beats CoveredBinary when both tags present on same path"
             );
-            // Once already covered by in-progress, a non-scoop binary is UncoveredBinary
-            // only when it's NOT in the covered set — verify the boundary.
             var crimeCovered = new HashSet<string> { "Crime" };
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
-                    new[] { "Crime" }, qty, scoop, bin, crimeCovered, t => t == "Crime"
+                    new[] { "Crime" },
+                    qty,
+                    scoop,
+                    bin,
+                    crimeCovered,
+                    t => t == "Crime"
                 ) == PathPriority.CoveredBinary,
                 "scoop tag already in-progress → CoveredBinary (not UncoveredScoop)"
             );
@@ -116,7 +136,6 @@ namespace NewsTowerAutoAssign.InGameTests
         {
             var empty = new HashSet<PlayerStatDataTag>();
 
-            // Degenerate case: all empty → no match
             ctx.Assert(
                 !AssignmentRules.StoryMatchesUncoveredGoal(empty, empty, empty, empty),
                 "all-empty → false"
@@ -150,7 +169,6 @@ namespace NewsTowerAutoAssign.InGameTests
             var tag0 = tags[0];
             var setWithTag = new HashSet<PlayerStatDataTag> { tag0 };
 
-            // Quantity goal: always matches regardless of inProgress
             ctx.Assert(
                 AssignmentRules.StoryMatchesUncoveredGoal(tags, setWithTag, empty, empty),
                 "quantity match → true"
@@ -160,13 +178,11 @@ namespace NewsTowerAutoAssign.InGameTests
                 "quantity match even when already in progress → true (quantity goals stack)"
             );
 
-            // Binary goal uncovered → matches
             ctx.Assert(
                 AssignmentRules.StoryMatchesUncoveredGoal(tags, empty, setWithTag, empty),
                 "binary uncovered → true"
             );
 
-            // Binary goal already covered → no match
             ctx.Assert(
                 !AssignmentRules.StoryMatchesUncoveredGoal(tags, empty, setWithTag, setWithTag),
                 "binary covered by in-progress story → false"
@@ -177,7 +193,6 @@ namespace NewsTowerAutoAssign.InGameTests
         {
             var empty = new HashSet<PlayerStatDataTag>();
 
-            // No yield tags → always PathPriority.None
             ctx.Assert(
                 AssignmentRules.GetPathGoalPriority(
                     Enumerable.Empty<PlayerStatDataTag>(),
@@ -228,13 +243,6 @@ namespace NewsTowerAutoAssign.InGameTests
                 ctx.Skip("live priority range", "no story files found on board");
         }
 
-        // Validates the six-clause filter in PickBestAvailable by asserting that:
-        //   1. GetSkillLevel returns 0 for null inputs (pure, always runs).
-        //   2. When PickBestAvailable returns a result, that result satisfies every
-        //      filter clause — a regressed clause (e.g. Assignment check removed)
-        //      would return a filtered-out employee and these assertions would fail.
-        //   3. When PickBestAvailable returns null, there is genuinely no free
-        //      employee — a false null return would fail this assertion.
         private static void ReporterSelectionTests(TestContext ctx)
         {
             ctx.Assert(
@@ -274,8 +282,6 @@ namespace NewsTowerAutoAssign.InGameTests
             }
             else
             {
-                // Null is valid only when no employee passes all filter clauses.
-                // If any free employee exists, PickBestAvailable should have returned them.
                 bool anyFree = Employee.Employees.Any(e =>
                     e != null
                     && e.IsAvailableForGlobeAssignment
@@ -291,13 +297,6 @@ namespace NewsTowerAutoAssign.InGameTests
                 );
             }
 
-            // Skill-level ordering: for any reporter returned from PickBestAvailable,
-            // no other free reporter should have a strictly higher skill level for any
-            // skill the returned reporter was picked for (i.e. null-skill pick).
-            // We can't enumerate a reporter's skills directly, so instead we verify the
-            // simpler invariant: every free reporter's GetSkillLevel(null) == 0, meaning
-            // null-skill ordering is a no-op tie (picks first in roster order), not
-            // accidentally reversed.
             int checkedCount = 0;
             foreach (var employee in Employee.Employees.Take(5))
             {

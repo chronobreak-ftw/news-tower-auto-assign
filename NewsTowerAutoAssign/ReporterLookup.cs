@@ -16,32 +16,13 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign
 {
-    // Queries about reporters and active goals. Anything that
-    // reads `Employee.Employees` or `QuestManager` lives here so the assignment
-    // evaluator stays focused on decision flow.
     internal static class ReporterLookup
     {
-        // The ScriptableObject asset name of the "Reporter" JobData. Production
-        // and Utility staff also satisfy Employee.IsGlobetrotter (they have a
-        // reportable component and a workplace) - IsGlobetrotter alone would
-        // over-count a 2-reporter / 10-support roster as 12 "globetrotters",
-        // which is exactly what the [ROSTER] diagnostic revealed. Filtering on
-        // this asset name is the same signal the game's own scoring UI uses
-        // (EmployeeDisplayer.reporterJobData) to tell reporter counts apart
-        // from production / utility counts.
         private const string ReporterJobName = "Reporter";
 
-        // Single source of truth for "this is a live, playable reporter we can
-        // reason about". All three reporter-scanning helpers below MUST use
-        // this - anything less restrictive pulls in non-reporter employees.
         private static bool IsPlayableReporter(Employee employee) =>
             IsPlayableEmployee(employee) && employee.JobHandler.JobData.name == ReporterJobName;
 
-        // Same eligibility filters as IsPlayableReporter minus the Reporter-
-        // job-name check. Ads are worked by salespeople, editors, typesetters
-        // and assemblers - none of which pass the Reporter filter - so the
-        // ad path needs this job-agnostic variant while still rejecting
-        // not-yet-hired, hidden-drawer, and non-globetrotter employees.
         private static bool IsPlayableEmployee(Employee employee)
         {
             if (employee == null)
@@ -58,13 +39,6 @@ namespace NewsTowerAutoAssign
             return true;
         }
 
-        // Fewer than `MinReportersToActivate` playable reporters means we
-        // cannot make reliable judgements. We intentionally require a
-        // Reporter JobData match here - Production / Utility employees also
-        // return true for Employee.IsGlobetrotter (they have reportable
-        // components + workplaces) but they don't cover stories, so letting
-        // them satisfy the gate would silently bypass the tutorial-phase
-        // safety and auto-assign with only 2 real reporters.
         internal static int CountPlayableReporters()
         {
             var matched = Employee.Employees.Where(IsPlayableReporter).ToList();
@@ -72,30 +46,12 @@ namespace NewsTowerAutoAssign
             return matched.Count;
         }
 
-        // Returns true if ANY playable reporter has the given skill trained,
-        // regardless of whether they are currently busy/timed-out. skill==null
-        // always returns true. Used to detect permanently unworkable paths
-        // (building not built or roster simply lacks the skill) - not just
-        // "everyone is temporarily busy".
         internal static bool AnyReporterEverHasSkill(SkillData skill) =>
             AnyMatchingEmployee(skill, IsPlayableReporter);
 
-        // Same as AnyReporterEverHasSkill but does NOT filter by Reporter
-        // JobData. Ads are worked by salespeople, editors, typesetters,
-        // assemblers etc. - none of which pass the Reporter filter, so the
-        // reporter-only variant would silently bail on every ad path. The
-        // drawer/hidden/globetrotter/in-tower gates are still applied
-        // because a hidden-drawer employee (tutorial NPC, etc.) or an
-        // employee not yet in the tower cannot be assigned work in the
-        // first place.
         internal static bool AnyEmployeeEverHasSkill(SkillData skill) =>
             AnyMatchingEmployee(skill, IsPlayableEmployee);
 
-        // Shared body for AnyReporterEverHasSkill / AnyEmployeeEverHasSkill.
-        // Callers differ only in how they define "playable". SkillHandler is
-        // conceptually a MonoBehaviour child of the employee and always
-        // present in a healthy game state, but mid-destruction it can be
-        // null - skip rather than NRE.
         private static bool AnyMatchingEmployee(SkillData skill, Func<Employee, bool> isPlayable)
         {
             if (skill == null)
@@ -112,12 +68,6 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
-        // Returns true if any playable reporter with `skill` is free now or
-        // will be free within `thresholdHours`. skill==null means any reporter
-        // qualifies. thresholdHours <= 0 disables the feature and always
-        // returns true. Converts via FromMinutes so fractional hours (e.g.
-        // 3.5h) are honoured - FromHours only accepts int and would silently
-        // round down.
         internal static bool AnyReporterAvailableSoon(SkillData skill, float thresholdHours)
         {
             if (thresholdHours <= 0f)
@@ -130,11 +80,7 @@ namespace NewsTowerAutoAssign
             {
                 if (!IsPlayableReporter(employee))
                     continue;
-                // Same null-safety rationale as AnyMatchingEmployee: these
-                // handlers are MonoBehaviour children and should always
-                // exist, but guarding the deref means a mid-destruction
-                // employee is silently skipped rather than NRE-ing the
-                // whole scan.
+
                 if (employee.SkillHandler == null || employee.TimeoutHandler == null)
                     continue;
                 if (skill != null && !employee.SkillHandler.HasSkillAndIsAssigned(skill))
@@ -147,29 +93,6 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
-        // Pre-filtered, score-ordered pick of the single best-suited employee
-        // for the given skill. Returns null when nobody currently qualifies.
-        //
-        // The six-clause filter reproduces the exact gates the game applies
-        // when you drag an assignee onto a story-file / ad slot - assigning
-        // without them would either silently fail or surface UI errors:
-        //
-        //   * IsAvailableForGlobeAssignment       - not mid-workplace-task
-        //   * AssignableToReportable != null      - the pawn has a reportable
-        //     component at all (editors / tutorial NPCs do not)
-        //   * AssignableToReportable.Assignment   - slot-level dedupe; without
-        //     this we'd ghost-assign on top of an in-flight story
-        //   * SkillHandler != null                - mid-destruction safety
-        //   * skill == null || has skill          - the path's required skill
-        //   * JobData.hideFromDrawer == false     - tutorial / cutscene NPCs
-        //
-        // Ordering by GetSkillLevel descending means a path that requires
-        // "Investigative" prefers the 5-star investigator over a 1-star
-        // investigator; skill == null uses 0 for everyone so ties break on
-        // iteration order (effectively roster order).
-        //
-        // Null-safe against `employee` because mid-destruction iteration can
-        // surface a nulled entry in Employee.Employees.
         internal static Employee PickBestAvailable(SkillData skill)
         {
             return Employee
@@ -186,16 +109,11 @@ namespace NewsTowerAutoAssign
                 .FirstOrDefault();
         }
 
-        // Returns the highest trained level of `skill` for `employee`, or 0 if the
-        // skill is null or untrained. Used to rank candidates so we prefer the
-        // strongest reporter for a slot.
         internal static int GetSkillLevel(Employee employee, SkillData skill)
         {
             if (skill == null)
                 return 0;
-            // Null-safe against a destroyed or mid-hire employee - the caller
-            // is a LINQ ordering in TryAssignSingleSlot where one NRE would
-            // abort the OrderBy for the whole roster.
+
             if (employee?.SkillHandler == null)
                 return 0;
             return employee.SkillHandler.TryGetSkill(skill, out Skill trainedSkill)
@@ -203,57 +121,6 @@ namespace NewsTowerAutoAssign
                 : 0;
         }
 
-        // Quest sources scanned:
-        //   1. QuestManager.Instance.AllRunningQuests - both District (row 0) and
-        //      HiddenAgenda (row 1 - faction quests) once the weekly recap has
-        //      promoted them from pending.
-        //   2. AreaMapQuestHub.Quest on every registered hub - defensive: catches
-        //      faction quests that are currently visible to the player but not yet
-        //      (or no longer) in the QuestManager's running array (mid-week edge
-        //      cases, save-load races).
-        //
-        // Extraction strategy (per ComposedQuest):
-        //   a) Walk the RUNTIME ComposableRuntimeComponent tree via
-        //      GetComponentsInChildren<T> - this is what the game itself uses in
-        //      ComposedQuest.Eval/OnStart to find requirements. It works for both
-        //      authored-static and mutable (CSV-driven) quests because mutable
-        //      quests populate their runtime tree from SaveComponentData even
-        //      when the ScriptableObject children list is empty.
-        //   b) Fall back to the data tree (QuestTargetSetRequirementData etc.)
-        //      only if the runtime tree yields nothing - belt-and-braces for
-        //      quests that haven't fully initialised yet.
-        // Returns three goal-tag sets. Correct per-tag classification (verified
-        // against the game source - see HotTopicsQuest.IsTagCompleted,
-        // QuestCollectingReward.CalculateInto, QuestCollectingCombo.CalculateInto):
-        //
-        //   quantity = tags whose reward SCALES per published copy - i.e. more
-        //              stories carrying the tag means strictly more reward, so
-        //              in-progress coverage never marks them "done". Only
-        //              QuestCollectingReward and QuestCollectingCombo
-        //              components produce these.
-        //
-        //   binary   = tags satisfied by a THRESHOLD - once the target count
-        //              is reached, more copies do nothing. This is everything
-        //              else:
-        //                * HotTopicsQuest weekly district goals (absoluteTarget
-        //                  bounded; typically target = 1)
-        //                * QuestTargetSetRequirement ("print N items tagged X")
-        //                * QuestTargetComboRequirement (combo thresholds)
-        //                * QuestTopTagRequirement (top-of-page, one-shot)
-        //                * QuestAboveTheFoldTagRequirement (above fold, one-shot)
-        //              Binary tags lose the goal shield once an in-progress
-        //              story already covers them; the mod stops chasing
-        //              duplicates.
-        //
-        //   scoop    = subset of `binary` where the underlying HotTopicsQuest
-        //              TargetSet is Scoop (competitive district mode). A
-        //              story-file path earns the highest priority only if the
-        //              tag is in this set AND still uncovered AND the path
-        //              IsScoop.
-        //
-        // A tag contributed by BOTH a collecting-reward/combo AND a threshold
-        // requirement belongs in `quantity` - the scaling reward keeps "more"
-        // valuable regardless of threshold state, so we never stop chasing.
         internal static (
             HashSet<PlayerStatDataTag> quantity,
             HashSet<PlayerStatDataTag> scoopQuantity,
@@ -272,9 +139,6 @@ namespace NewsTowerAutoAssign
                 ExtractQuestTags(quest, quantity, scoopQuantity, binary);
             }
 
-            // If a tag ended up in BOTH sets because the same composed quest
-            // has a scaling-reward component AND a threshold requirement on
-            // the same tag, quantity wins (stacking reward keeps it valuable).
             binary.ExceptWith(quantity);
 
             AssignmentLog.Verbose(
@@ -290,12 +154,8 @@ namespace NewsTowerAutoAssign
             return (quantity, scoopQuantity, binary);
         }
 
-        // All live quests that could contribute goal tags, from every source we
-        // know about. Union (by reference) across sources is handled by the
-        // caller's HashSets - the tag sets dedupe naturally.
         private static IEnumerable<Quest> EnumerateAllActiveQuests()
         {
-            // 1. QuestManager.runningQuests - primary source (both rows).
             if (QuestManager.Instance != null)
             {
                 foreach (var quest in QuestManager.Instance.AllRunningQuests)
@@ -305,10 +165,6 @@ namespace NewsTowerAutoAssign
                 }
             }
 
-            // 2. AreaMapQuestHub.Quest on every hub - faction quests (mafia,
-            //    mayor, police...) live here. Some mid-week states have the hub
-            //    holding the live quest even when QuestManager's HiddenAgenda
-            //    slot is transitioning.
             var areaMapRoot = AreaMapRoot.Instance;
             if (areaMapRoot != null)
             {
@@ -320,7 +176,6 @@ namespace NewsTowerAutoAssign
             }
         }
 
-        // Pull tags from a single quest into the three sets.
         private static void ExtractQuestTags(
             Quest quest,
             HashSet<PlayerStatDataTag> quantity,
@@ -330,11 +185,6 @@ namespace NewsTowerAutoAssign
         {
             var added = new HashSet<PlayerStatDataTag>();
 
-            // HotTopicsQuest weekly goals are threshold-bounded
-            // (absoluteTarget, typically 1). Each tag is BINARY - satisfied
-            // when StashSet + in-progress hits the target. Scoop flag here is
-            // a flag on the SAME binary tag (competitive district), not a
-            // separate category.
             if (quest is HotTopicsQuest hotTopics && hotTopics.TargetSet != null)
             {
                 foreach (var tag in hotTopics.TargetSet.DistinctTagTypes)
@@ -348,17 +198,10 @@ namespace NewsTowerAutoAssign
                 }
             }
 
-            // ComposedQuest (district story + faction/NPC hidden-agenda).
-            // Scaling-reward components (QuestCollectingReward, QuestCollectingCombo)
-            // contribute QUANTITY tags; every other requirement type is binary.
             if (quest is ComposedQuest composed)
             {
                 ExtractComposedQuestTags(composed, quantity, binary, added);
 
-                // If a non-dummy quest contributed zero tags, dump its
-                // structure so we can see what component types the game
-                // actually built for it - extractor coverage gap or a
-                // runtime/data tree problem.
                 if (added.Count == 0 && !composed.IsDummy)
                     DumpComposedQuestStructure(composed, "no tags extracted");
             }
@@ -375,27 +218,6 @@ namespace NewsTowerAutoAssign
             );
         }
 
-        // Extract goal tags from a ComposedQuest, splitting by how the
-        // underlying component rewards:
-        //
-        //   * QuestCollectingReward / QuestCollectingCombo tags → QUANTITY.
-        //     These components' Contributor.CalculateInto multiplies the
-        //     reward by the count of tagged articles / combo points - strictly
-        //     more-is-better, so we never want to stop chasing the tag.
-        //
-        //   * QuestTargetSetRequirement / QuestTargetComboRequirement /
-        //     QuestTopTagRequirement / QuestAboveTheFoldTagRequirement →
-        //     BINARY. These are threshold-satisfied: once the count or
-        //     placement is reached, extra tagged articles add no reward.
-        //
-        // `addedOut` collects every tag added to either bucket so the caller
-        // can log per-quest provenance. Order matters: we populate quantity
-        // first so the binary branches can skip tags already claimed as
-        // quantity (de-dup is also enforced by the final ExceptWith in
-        // GetCurrentGoalTagSets as a safety net).
-        //
-        // Data-tree fallback runs only when the runtime tree turns up empty,
-        // which happens for quests that haven't fully initialised yet.
         internal static void ExtractComposedQuestTags(
             ComposedQuest composed,
             HashSet<PlayerStatDataTag> quantity,
@@ -505,10 +327,6 @@ namespace NewsTowerAutoAssign
                 addedOut.Add(tag);
         }
 
-        // Add to the binary bucket unless the tag is already claimed as
-        // quantity elsewhere on this quest - a scaling-reward tag stays in
-        // quantity even if the same quest also has a threshold requirement
-        // on it (stacking beats threshold for "keep chasing").
         private static void AddBinaryTag(
             PlayerStatDataTag tag,
             HashSet<PlayerStatDataTag> quantity,
@@ -522,10 +340,6 @@ namespace NewsTowerAutoAssign
                 addedOut.Add(tag);
         }
 
-        // Dumps the full structure of a ComposedQuest to the log. Used by
-        // tests and by the scanner when extraction turns up empty on a
-        // non-dummy quest, so we can see exactly which components the game
-        // built for that quest rather than guessing.
         internal static void DumpComposedQuestStructure(ComposedQuest composed, string reason)
         {
             if (composed == null)
@@ -542,7 +356,6 @@ namespace NewsTowerAutoAssign
                     + ")"
             );
 
-            // Runtime tree - what ComposedQuest.Eval / UI strip iterate.
             var runtimeTypes = composed
                 .GetComponentsInChildren<object>(true)
                 .Select(child => child.GetType().Name)
@@ -557,10 +370,6 @@ namespace NewsTowerAutoAssign
                     + "]"
             );
 
-            // Data tree - authored ScriptableObject hierarchy. The UI and
-            // CreateQuest read from here to build the runtime tree. When
-            // the data tree has components but the runtime tree doesn't,
-            // something went wrong in ComposableRuntimeComponent build.
             if (composed.Data != null)
             {
                 var dataTypes = composed
@@ -578,8 +387,6 @@ namespace NewsTowerAutoAssign
             }
         }
 
-        // Human-readable label so faction quests are identifiable in logs.
-        // e.g. "Mafia: Cargo Cover-Up" vs. "District weekly".
         private static string QuestIdentityLabel(Quest quest)
         {
             if (quest is ComposedQuest cq && cq.Data != null)
@@ -593,10 +400,6 @@ namespace NewsTowerAutoAssign
             return "quest";
         }
 
-        // Tags from news items that have ANY production progress - reporter assigned,
-        // reporter returned with a completed story file, or the file is sitting in the
-        // production queue awaiting the newspaper layout step. Used to avoid
-        // double-chasing binary (green-panel) goals.
         internal static HashSet<PlayerStatDataTag> GetInProgressTags()
         {
             var tags = new HashSet<PlayerStatDataTag>();

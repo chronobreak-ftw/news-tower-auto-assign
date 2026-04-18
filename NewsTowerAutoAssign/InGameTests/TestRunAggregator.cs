@@ -1,8 +1,5 @@
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Totals for the currently-building test run, populated as each
-    // TestContext.PrintSummary() fires. Drained + reset by InGameTestRunner
-    // right after it emits the colour-coded [RUN] master summary.
     internal static class TestRunAggregator
     {
         internal static int TotalPassed { get; private set; }

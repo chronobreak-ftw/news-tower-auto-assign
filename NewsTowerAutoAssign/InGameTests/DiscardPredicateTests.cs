@@ -1,7 +1,5 @@
 namespace NewsTowerAutoAssign.InGameTests
 {
-    // Tests for DiscardPredicates - the three pure boolean discard decisions.
-    // These run without any live game state and should always pass.
     internal static class DiscardPredicateTests
     {
         internal static void Run()

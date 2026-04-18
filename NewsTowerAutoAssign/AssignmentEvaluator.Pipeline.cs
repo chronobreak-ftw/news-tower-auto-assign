@@ -15,16 +15,8 @@ using Tower_Stats;
 
 namespace NewsTowerAutoAssign
 {
-    // Discard paths, path viability, slot assignment, and assignment logging.
-    // Split from AssignmentEvaluator.cs to keep the entry/scan surface area
-    // readable; this file is the bulk of the per-story pipeline.
     internal static partial class AssignmentEvaluator
     {
-        // Emits the decision log line and removes the story from the live
-        // manager. All four discard paths in AssignNewsItemCore funnel
-        // through here so the log format stays identical regardless of
-        // reason, and the removal can't accidentally be forgotten when a
-        // new discard reason is added.
         private static void DiscardStory(NewsItem newsItem, string reasonLabel, string detail)
         {
             AssignmentLog.Discard(
@@ -39,9 +31,6 @@ namespace NewsTowerAutoAssign
             LiveReportableManager.Instance.RemoveReportable(newsItem);
         }
 
-        // Formats the trailing "Goals: ..." clause shared by the risk /
-        // weekend / availability discard lines. Kept as a helper so the three
-        // logs can't drift apart in phrasing.
         private static string GoalSnapshotSuffix(
             HashSet<PlayerStatDataTag> quantityGoalTags,
             HashSet<PlayerStatDataTag> binaryGoalTags,
@@ -51,10 +40,6 @@ namespace NewsTowerAutoAssign
             + AssignmentLog.GoalSnapshot(quantityGoalTags, binaryGoalTags, inProgressTags)
             + ".";
 
-        // Returns true if at least one non-resolved node on the story has zero
-        // viable paths (missing building OR no reporter with the required skill).
-        // Takes the pre-cached story-file list from AssignNewsItemCore so we
-        // don't walk the transform hierarchy twice per scan.
         internal static bool HasDeadEndNode(List<NewsItemStoryFile> allStoryFiles)
         {
             var nodeViability = new Dictionary<NewsItemNode, bool>();
@@ -71,9 +56,6 @@ namespace NewsTowerAutoAssign
             return nodeViability.Values.Any(viable => !viable);
         }
 
-        // A node is "open" for dead-end analysis iff it is neither completed,
-        // destroyed, locked, nor missing entirely. Everything else contributes
-        // to whether at least one of its sibling paths is viable.
         private static bool NodeIsOpen(NewsItemStoryFile storyFile)
         {
             var state = storyFile.Node?.NodeState ?? NewsItemNodeState.Unlocked;
@@ -92,10 +74,6 @@ namespace NewsTowerAutoAssign
                 AssetUnlocker.IsUnlockedSafe(skill) && ReporterLookup.AnyReporterEverHasSkill(skill)
             );
 
-        // True when a story file path is currently assignable - not completed, not
-        // already running, building is built, and the roster actually has the skill.
-        // Each rejection emits a verbose "skipping path" line so the log is
-        // self-explanatory when stories sit with no assignments.
         private static bool PathIsAssignableNow(NewsItemStoryFile storyFile)
         {
             if (storyFile.IsCompleted)
@@ -111,8 +89,6 @@ namespace NewsTowerAutoAssign
             return SkillIsAvailable(storyFile.AssignSkill);
         }
 
-        // Skill-side gates shared between PathIsAssignableNow and any caller
-        // that needs to know whether a given skill is reachable right now.
         private static bool SkillIsAvailable(SkillData skill)
         {
             if (skill == null)
@@ -142,11 +118,6 @@ namespace NewsTowerAutoAssign
                 "  -> skipping path (" + reason + ": " + (skill?.skillName ?? "any") + ")"
             );
 
-        // NewsItemXorBranch (game "XOR Unlock") is a real either/or split: completing
-        // one outbound branch freezes the others. NewsItemAndBranch is the opposite —
-        // all inbound branches must complete. We only treat assignable slots as an
-        // "ambiguous path" when two of them are alternatives under the same XOR
-        // splitter; parallel prerequisites (converging AND) stay auto-assignable.
         private static NewsItemXorBranch GetXorSplitterForStoryNode(NewsItemNode node)
         {
             if (node == null)
@@ -216,9 +187,6 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
-        // Top-level per-slot flow: availability probe, pick, pre-flight, log,
-        // commit. Each check that fails emits its own decision-once log and
-        // returns; the commit is a single line.
         private static void TryAssignSingleSlot(
             NewsItem newsItem,
             NewsItemStoryFile storyFile,
@@ -241,8 +209,6 @@ namespace NewsTowerAutoAssign
                 return;
             }
 
-            // Visibility flip must happen before AssignTo (see
-            // MarkStoryFileVisible for the full "black-bar bug" rationale).
             MarkStoryFileVisible(storyFile);
 
             if (!PassesPreFlight(storyFile, employee, skill, newsItem))
@@ -264,10 +230,6 @@ namespace NewsTowerAutoAssign
             GlobeAttentionSync.PromoteFullySeen(newsItem);
         }
 
-        // Soft availability gate: returns false (and logs once) when nobody
-        // qualifies for this slot's skill within the configured lookahead.
-        // "Story kept, will retry" - we don't discard here; that decision
-        // was already made at the story level in TryDiscardForAvailability.
         private static bool HasAnyReporterSoon(
             NewsItem newsItem,
             SkillData skill,
@@ -291,10 +253,6 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
-        // Emits the "all eligible reporters are busy right now" decision log
-        // once. PickBestAvailable returning null is distinct from the "soon"
-        // probe above - someone WILL be free in N hours but nobody is right
-        // now (e.g. everyone mid-assignment).
         private static void LogNoReporterAvailable(NewsItem newsItem, SkillData skill)
         {
             AssignmentLog.DecisionOnce(
@@ -309,20 +267,9 @@ namespace NewsTowerAutoAssign
             );
         }
 
-        // Mark the story file as visible before AssignTo. NewsItemStoryFile
-        // implements INewsItemVisibleHandler.OnVisibilityChanged - the same
-        // method NewsbookRoot calls when the newsbook page is viewed - which
-        // flips the private `isVisible` flag that ICanAssignHandler.CanAssign
-        // gates on. Without this the reporter appears assigned but
-        // progressDoneEvent is never created (black-bar bug) because the
-        // CanAssign check inside OnAssigned silently fails.
         private static void MarkStoryFileVisible(NewsItemStoryFile storyFile) =>
             storyFile.OnVisibilityChanged(true);
 
-        // Runs every CanAssignHandler the story file publishes. Returns true
-        // if they all accept the employee; otherwise logs the failure at the
-        // appropriate level (verbose for expected sibling-lock, warn for
-        // anything else) and returns false.
         private static bool PassesPreFlight(
             NewsItemStoryFile storyFile,
             Employee employee,
@@ -332,9 +279,6 @@ namespace NewsTowerAutoAssign
         {
             if (storyFile.CanAssignHandlers.All(handler => handler.CanAssign(employee)))
                 return true;
-            // NodeState=Locked is expected - a sibling branch was chosen on a
-            // mutually-exclusive node. Log at VERBOSE so it doesn't look like
-            // a bug.
             if (storyFile.Node?.NodeState == NewsItemNodeState.Locked)
             {
                 AssignmentLog.Verbose(
@@ -366,12 +310,6 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
-        // Builds a human-readable reason string for risk-kept / weekend-kept
-        // decisions: lists which story tags pushed us into "match uncovered goal"
-        // territory (by category), and which ones were ALREADY covered by in-progress
-        // stories. The covered list is what the user cares about when they see the
-        // "tag already covered but story started anyway" scenario - it lets them
-        // confirm at a glance what the mod considered uncovered vs covered.
         private static string DescribeGoalMatch(
             NewsItem newsItem,
             HashSet<PlayerStatDataTag> quantityGoalTags,
@@ -486,11 +424,6 @@ namespace NewsTowerAutoAssign
             return ", other path: " + string.Join(", ", labels);
         }
 
-        // Emits the normal-mode ASSIGNED line. Format is the same uniform shape
-        // as every other decision log:
-        //   "<name> [story tags] → ASSIGNED: path=Skill yield=[...] reporter=Name - reason: ..."
-        // Multi-path stories also include the runner-up's priority so it's
-        // obvious why this path beat its siblings.
         private static void LogAssignmentDecision(
             NewsItem newsItem,
             NewsItemStoryFile chosen,
@@ -558,8 +491,6 @@ namespace NewsTowerAutoAssign
             );
         }
 
-        // Thin wrapper exposed for in-game tests so they can replicate the
-        // XOR-ambiguity check without duplicating the graph-walk logic.
         internal static bool HasXorAmbiguousSlots(List<NewsItemStoryFile> slots) =>
             SlotsContainXorExclusivePair(slots);
 

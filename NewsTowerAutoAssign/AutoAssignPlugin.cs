@@ -5,34 +5,15 @@ using HarmonyLib;
 
 namespace NewsTowerAutoAssign
 {
-    // Plugin bootstrap. Owns configuration, logger, and Harmony patch install.
-    // All decision logic lives in AssignmentEvaluator; this class just wires it up.
-    //
-    // Every ConfigEntry below is currently DEVELOPER-ONLY: hidden from the
-    // in-game ConfigurationManager UI and tagged IsAdvanced so even mods that
-    // bypass Browsable still categorise them as "power user only". The .cfg
-    // file on disk still works for my own testing. When we decide which knobs
-    // real players should see, we'll drop the `Hidden` helper for just those.
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class AutoAssignPlugin : BaseUnityPlugin
     {
-        // Kept as constants so the Harmony instance id, BepInPlugin metadata,
-        // and any future "tell me your version" diagnostic all agree by
-        // construction. Bump PluginVersion in one place per release.
         private const string PluginGuid = "newstower.autoassign";
         private const string PluginName = "News Tower Auto Assign";
-        private const string PluginVersion = "1.0.3";
+        private const string PluginVersion = "1.0.4";
 
-        // Harmony instance id. Distinct from PluginGuid deliberately - the
-        // reverse-domain string here matches the namespace convention other
-        // mods use for their Harmony ids and is already on the wire for
-        // anyone monitoring Harmony patch ownership.
-        private const string HarmonyId = "com.yourname.newstower.autoassign";
+        private const string HarmonyId = "newstower.autoassign";
 
-        // Default values for configuration entries. Duplicated from the
-        // summary review recommendation: any default that's ever tuned
-        // lives as a named constant so the code reads as intent rather
-        // than magic numbers.
         private const float DefaultDiscardIfNoReporterHours = 4.0f;
         private const int DefaultMinReportersToActivate = 3;
 
@@ -54,9 +35,7 @@ namespace NewsTowerAutoAssign
         internal static ConfigEntry<int> MinReportersToActivate;
 
 #if DEBUG
-        // Developer-only logging knobs. In Release builds AssignmentLog's
-        // non-error helpers are [Conditional("DEBUG")] no-ops, so these
-        // toggles have nothing to gate and are omitted from the .cfg file.
+
         internal static ConfigEntry<bool> VerboseLogs;
         internal static ConfigEntry<bool> OnlyLogTests;
 #endif
@@ -79,17 +58,10 @@ namespace NewsTowerAutoAssign
             }
             catch (System.Exception ex)
             {
-                // A patch that fails to install is the single most dangerous
-                // thing we can do to someone's save. Log loudly and let the
-                // game continue unpatched rather than crash.
                 AssignmentLog.Error("Awake failed - auto-assign will not run this session: " + ex);
             }
         }
 
-        // Builds a ConfigDescription that ConfigurationManager will hide from
-        // its UI entirely (Browsable=false) and, as a belt-and-braces fallback
-        // for custom UI forks, also marks as IsAdvanced. Every flag uses this
-        // for now - no knob is ready to expose to regular players yet.
         private static ConfigDescription Hidden(string description) =>
             new ConfigDescription(
                 description,
@@ -97,14 +69,12 @@ namespace NewsTowerAutoAssign
                 new ConfigurationManagerAttributes { Browsable = false, IsAdvanced = true }
             );
 
-        // Binds every [Dev] key (alphabetical in BindDevSectionConfig) plus DEBUG-only entries.
         private void BindConfig()
         {
             BindDevSectionConfig();
             BindDebugConfig();
         }
 
-        // All [Dev] keys in alphabetical order by setting name (matches README).
         private void BindDevSectionConfig()
         {
             AutoAssignAds = BindHidden(
@@ -195,9 +165,6 @@ namespace NewsTowerAutoAssign
                 MinReportersToActivate.Value = DefaultMinReportersToActivate;
         }
 
-        // Developer-only knobs. Conditional-compiled out of Release builds
-        // entirely because the code paths they gate (AssignmentLog.Verbose,
-        // test-only log filtering) are [Conditional("DEBUG")].
         private void BindDebugConfig()
         {
 #if DEBUG
@@ -214,10 +181,6 @@ namespace NewsTowerAutoAssign
 #endif
         }
 
-        // Typed overloads so every bind site reads like
-        //   X = BindHidden("Key", default, "Description.");
-        // rather than the Section / ConfigDescription ceremony. Section is
-        // fixed at ConfigSection ("Dev") for every developer knob below.
         private ConfigEntry<bool> BindHidden(string key, bool defaultValue, string description) =>
             Config.Bind(ConfigSection, key, defaultValue, Hidden(description));
 
@@ -227,12 +190,6 @@ namespace NewsTowerAutoAssign
         private ConfigEntry<float> BindHidden(string key, float defaultValue, string description) =>
             Config.Bind(ConfigSection, key, defaultValue, Hidden(description));
 
-        // Every reflection target in the mod is probed at startup rather than
-        // lazily at first use so a game-update compat regression surfaces once
-        // at plugin load rather than once per scan target (which would be
-        // noisy) and independent of whether the relevant automation ever fires
-        // in the player's session. Every error below is routed through
-        // AssignmentLog.Error so it survives Release-build log suppression.
         private void VerifyReflection()
         {
             VerifyProgressDoneEventReflection();
