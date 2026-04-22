@@ -68,6 +68,27 @@ namespace NewsTowerAutoAssign
             return false;
         }
 
+        internal static string GetAvailabilitySummary(float thresholdHours)
+        {
+            int free = 0,
+                soon = 0,
+                busy = 0;
+            int minutes = (int)Math.Round(thresholdHours * 60f);
+            var deadline = TowerTime.CurrentTime + TowerTimeDuration.FromMinutes(minutes);
+            foreach (var emp in Employee.Employees)
+            {
+                if (!IsPlayableReporter(emp) || emp.TimeoutHandler == null)
+                    continue;
+                if (!emp.TimeoutHandler.IsTimedOut)
+                    free++;
+                else if (emp.TimeoutHandler.GetReleaseTime() <= deadline)
+                    soon++;
+                else
+                    busy++;
+            }
+            return "free=" + free + " soon=" + soon + " busy=" + busy;
+        }
+
         internal static bool AnyReporterAvailableSoon(SkillData skill, float thresholdHours)
         {
             if (thresholdHours <= 0f)

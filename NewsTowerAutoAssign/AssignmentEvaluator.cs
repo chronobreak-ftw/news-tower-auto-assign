@@ -35,9 +35,10 @@ namespace NewsTowerAutoAssign
             _isAssigning = true;
             try
             {
+                var allItems = LiveReportableManager.Instance.GetNewsItems().ToList();
                 var (quantityGoalTags, scoopGoalTags, binaryGoalTags, inProgressTags) =
                     LoadGoalContext();
-                foreach (var newsItem in LiveReportableManager.Instance.GetNewsItems().ToList())
+                foreach (var newsItem in allItems)
                     ProcessScannedNewsItem(
                         newsItem,
                         quantityGoalTags,
@@ -370,6 +371,7 @@ namespace NewsTowerAutoAssign
                 )
             )
                 return false;
+
             DiscardStory(
                 ctx.NewsItem,
                 "weekend",
@@ -471,14 +473,16 @@ namespace NewsTowerAutoAssign
         )
         {
             float thresholdHours = AutoAssignPlugin.DiscardIfNoReporterForHours.Value;
+            bool anyReporterSoon = slots.Any(sf =>
+                ReporterLookup.AnyReporterAvailableSoon(sf.AssignSkill, thresholdHours)
+            );
+
             if (
                 !DiscardPredicates.ShouldDiscardForAvailability(
                     ctx.AlreadyInvested,
                     ctx.StoryMatchesGoal,
                     thresholdHours,
-                    anyReporterSoon: slots.Any(sf =>
-                        ReporterLookup.AnyReporterAvailableSoon(sf.AssignSkill, thresholdHours)
-                    )
+                    anyReporterSoon
                 )
             )
                 return false;

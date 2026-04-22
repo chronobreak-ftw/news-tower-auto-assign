@@ -17,6 +17,11 @@ namespace NewsTowerAutoAssign
 {
     internal static partial class AssignmentEvaluator
     {
+        internal static readonly System.Collections.Generic.HashSet<Reportable> _pendingHolderRelease =
+            new System.Collections.Generic.HashSet<Reportable>();
+
+        internal static void ClearPendingHolderRelease() => _pendingHolderRelease.Clear();
+
         private static void DiscardStory(NewsItem newsItem, string reasonLabel, string detail)
         {
             AssignmentLog.Discard(
@@ -28,7 +33,17 @@ namespace NewsTowerAutoAssign
                     + "): "
                     + detail
             );
+
+            var globeHolder = newsItem.GetComponentInChildren<ReportableGlobeHolderComponent>(true);
+            bool hadHolder =
+                globeHolder?.ReportableHolder != null
+                && globeHolder.ReportableHolder.CurrentHolding == globeHolder;
+            if (!hadHolder)
+                _pendingHolderRelease.Add(newsItem);
+
             LiveReportableManager.Instance.RemoveReportable(newsItem);
+
+            newsItem.GetComponentInChildren<ReportableDismiss>(true)?.Dismiss();
         }
 
         private static string GoalSnapshotSuffix(

@@ -10,7 +10,7 @@ namespace NewsTowerAutoAssign
     {
         private const string PluginGuid = "newstower.autoassign";
         private const string PluginName = "News Tower Auto Assign";
-        private const string PluginVersion = "1.0.4";
+        private const string PluginVersion = "1.0.5";
 
         private const string HarmonyId = "newstower.autoassign";
 

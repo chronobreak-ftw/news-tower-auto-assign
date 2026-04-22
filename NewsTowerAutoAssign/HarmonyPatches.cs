@@ -23,6 +23,7 @@ namespace NewsTowerAutoAssign
                 AssignmentLog.ResetForNewSave();
                 AutoAssignOwnershipRegistry.ResetForNewSave();
                 BribeAutomation.ResetForNewSave();
+                AssignmentEvaluator.ClearPendingHolderRelease();
                 AssignmentLog.Verbose(
                     "PATCH",
                     "LiveReportableManager.Awake - SafetyGate closed, decision log + bribe cache reset"
@@ -31,6 +32,32 @@ namespace NewsTowerAutoAssign
             catch (Exception ex)
             {
                 AssignmentLog.Error("Patch_LRMAwake.Postfix: " + ex);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(ReportableGlobeHolderComponent), "AssignHolder")]
+    static class Patch_AssignHolder
+    {
+        static void Postfix(
+            ReportableGlobeHolderComponent __instance,
+            IReportableHolder reportableHolder
+        )
+        {
+            try
+            {
+                if (reportableHolder == null)
+                    return;
+                if (reportableHolder.CurrentHolding != __instance)
+                    return;
+                if (!AssignmentEvaluator._pendingHolderRelease.Remove(__instance.Reportable))
+                    return;
+
+                reportableHolder.CurrentHolding = null;
+            }
+            catch (Exception ex)
+            {
+                AssignmentLog.Error("Patch_AssignHolder.Postfix: " + ex);
             }
         }
     }
